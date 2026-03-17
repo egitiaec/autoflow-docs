@@ -1,0 +1,537 @@
+openapi: 3.0.0
+info:
+  title: AutoFlow API
+  description: API REST para AutoFlow — SaaS de automatización para PYMEs ecuatorianas
+  version: 0.1.0
+  contact:
+    name: EGIT Consultoría
+    email: dev@egit-consultoria.com
+  license:
+    name: Propietario
+
+servers:
+  - url: http://localhost:3000/api
+    description: Desarrollo local
+  - url: https://staging.autoflow.ec/api
+    description: Staging
+  - url: https://api.autoflow.ec/api
+    description: Producción
+
+tags:
+  - name: auth
+    description: Autenticación y gestión de usuarios
+  - name: crm
+    description: Gestión de clientes y pipeline
+  - name: orders
+    description: Pedidos y facturación
+  - name: whatsapp
+    description: Integración con WhatsApp Business API
+  - name: reports
+    description: Reportes y dashboards
+  - name: notifications
+    description: Sistema de notificaciones
+
+paths:
+  # ──────────────── AUTH ────────────────
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Registrar nuevo usuario
+      description: Crea una cuenta nueva y retorna un token JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Usuario creado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email ya registrado
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Iniciar sesión
+      description: Autentica al usuario y retorna un token JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Credenciales inválidas
+
+  # ──────────────── CRM / CLIENTS ────────────────
+  /clients:
+    get:
+      tags: [crm]
+      summary: Listar clientes
+      description: Retorna lista paginada de clientes del tenant actual.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          description: Buscar por nombre, email o teléfono
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de clientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Client'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [crm]
+      summary: Crear cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientCreate'
+      responses:
+        '201':
+          description: Cliente creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ──────────────── ORDERS ────────────────
+  /orders:
+    get:
+      tags: [orders]
+      summary: Listar pedidos
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          description: Filtrar por estado
+          schema:
+            type: string
+            enum: [pending, confirmed, delivered, cancelled]
+      responses:
+        '200':
+          description: Lista de pedidos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  total:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [orders]
+      summary: Crear pedido
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreate'
+      responses:
+        '201':
+          description: Pedido creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ──────────────── WHATSAPP ────────────────
+  /whatsapp/messages:
+    get:
+      tags: [whatsapp]
+      summary: Listar mensajes de WhatsApp
+      parameters:
+        - name: contactId
+          in: query
+          description: Filtrar por contacto
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Lista de mensajes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WhatsappMessage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /whatsapp/webhook:
+    post:
+      tags: [whatsapp]
+      summary: Webhook de Meta WhatsApp API
+      description: Endpoint receives incoming messages and status updates from Meta. Verificado con el verify token configurado.
+      parameters:
+        - name: hub.mode
+          in: query
+          schema:
+            type: string
+        - name: hub.verify_token
+          in: query
+          schema:
+            type: string
+        - name: hub.challenge
+          in: query
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Payload de Meta WhatsApp API
+      responses:
+        '200':
+          description: Challenge response (verificación) o OK (mensajes)
+        '403':
+          description: Token de verificación inválido
+
+  # ──────────────── REPORTS ────────────────
+  /reports/summary:
+    get:
+      tags: [reports]
+      summary: Resumen de actividad
+      description: Retorna métricas agregadas para el dashboard principal.
+      parameters:
+        - name: from
+          in: query
+          description: Fecha inicio (ISO 8601)
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Fecha fin (ISO 8601)
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Resumen de actividad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+# ──────────────── COMPONENTS ────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # Auth
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 2
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, manager, agent]
+        tenantId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    # CRM
+    Client:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        company:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+        tenantId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ClientCreate:
+      type: object
+      required: [name, phone]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        company:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+
+    # Orders
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, confirmed, delivered, cancelled]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        total:
+          type: number
+          format: float
+        notes:
+          type: string
+        tenantId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderCreate:
+      type: object
+      required: [clientId, items]
+      properties:
+        clientId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        notes:
+          type: string
+
+    OrderItem:
+      type: object
+      required: [name, quantity, price]
+      properties:
+        name:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        price:
+          type: number
+          format: float
+          minimum: 0
+
+    # WhatsApp
+    WhatsappMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        body:
+          type: string
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        timestamp:
+          type: string
+          format: date-time
+
+    # Reports
+    ReportSummary:
+      type: object
+      properties:
+        totalClients:
+          type: integer
+        newClients:
+          type: integer
+        totalOrders:
+          type: integer
+        totalRevenue:
+          type: number
+          format: float
+        whatsappMessages:
+          type: integer
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+            to:
+              type: string
+              format: date
+
+  responses:
+    BadRequest:
+      description: Petición inválida
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              details:
+                type: array
+                items:
+                  type: object
+
+    Unauthorized:
+      description: No autenticado o token expirado
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: "Unauthorized"
+
+  security:
+    - bearerAuth: []
