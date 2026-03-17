@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |-------|-------|
-| **Estado** | En Revisión — Pendiente Aprobación Final Eduardo |
+| **Estado** | ✅ Aprobado — Eduardo Guerra, 2026-03-17 |
 | **Fecha** | 2026-03-16 |
 | **Última revisión** | 2026-03-17 (Archy — v2.2: Evolution API, FCM, appointment-service, specs iniciales) |
 | **Decisor** | Eduardo (CEO) |
