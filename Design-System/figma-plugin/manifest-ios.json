@@ -1,0 +1,8 @@
+{
+  "name": "AutoFlow — iOS UI Kit",
+  "id": "autoflow-ios-screens",
+  "api": "1.0.0",
+  "main": "code-ios.js",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page"
+}

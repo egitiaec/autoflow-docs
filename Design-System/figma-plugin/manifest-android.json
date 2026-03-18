@@ -1,0 +1,8 @@
+{
+  "name": "AutoFlow — Android Jetpack Compose",
+  "id": "autoflow-android-screens",
+  "api": "1.0.0",
+  "main": "code-android.js",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page"
+}

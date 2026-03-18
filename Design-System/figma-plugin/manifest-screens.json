@@ -1,0 +1,8 @@
+{
+  "name": "AutoFlow — Web Screens",
+  "id": "autoflow-web-screens",
+  "api": "1.0.0",
+  "main": "code-screens.js",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page"
+}

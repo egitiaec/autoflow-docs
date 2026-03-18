@@ -1,0 +1,7 @@
+{
+  "name": "AutoFlow Components Builder",
+  "id": "autoflow-components-builder",
+  "api": "1.0.0",
+  "main": "code-components.js",
+  "editorType": ["figma"]
+}
