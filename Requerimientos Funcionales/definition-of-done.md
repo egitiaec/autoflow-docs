@@ -177,7 +177,7 @@ public class ClientController {
 }
 ```
 
-### Frontend (React + TypeScript)
+### Frontend (Angular + PrimeNG + Bootstrap)
 
 #### Estructura del Proyecto
 ```
