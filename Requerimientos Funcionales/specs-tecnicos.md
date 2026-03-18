@@ -1,8 +1,9 @@
 # Especificaciones Técnicas — AutoFlow
-**Versión:** 1.0  
-**Fecha:** 2026-03-17  
-**Autor:** Axel (Scrum Master, EGIT Consultoría)  
-**Referencia:** ADR-001 v2.0 + ADR-002 v2.2 + Historias de Usuario (52 HUs)
+**Versión:** 1.1
+**Fecha:** 2026-03-17
+**Autor:** Axel (Scrum Master, EGIT Consultoría) / Doc (Documentador de Arquitectura)
+**Referencia:** ADR-001 v2.0 + ADR-002 v2.2 + Historias de Usuario (65 HUs)
+**Changelog v1.1:** Agregado Epic 9 (billing-service), Epic 10 (configuración contribuyente), integración chatbot N8N
 
 ---
 
@@ -878,6 +879,392 @@ updated_at (TIMESTAMP)
 
 ---
 
+## Epic 9: Facturación Electrónica (SRI Ecuador) — billing-service
+
+### Descripción Técnica
+El `billing-service` (también referido como `invoicing-service`) gestiona el ciclo completo de comprobantes electrónicos ante el SRI de Ecuador: generación de facturas, notas de crédito, comprobantes de retención y guías de remisión. Cada comprobante pasa por el flujo: generación → firma electrónica (con certificado .p12) → envío al SRI → recepción de autorización → generación de PDF con QR → almacenamiento. Se integra con HashiCorp Vault para el almacenamiento seguro del certificado digital y con los web services del SRI (recepción y autorización). El certificado .p12 se carga desde Vault según ADR-002 v2.2.
+
+### Microservicio Responsable
+- **billing-service** (Spring Boot 3.2 + PostgreSQL + XML Digital Signature + HashiCorp Vault)
+
+### Integración con SRI Web Service
+
+**Endpoints del SRI:**
+| Ambiente | Recepción | Autorización |
+|----------|-----------|-------------|
+| Pruebas | `https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline` | `https://celcer.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline` |
+| Producción | `https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline` | `https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline` |
+
+**Flujo de comprobante:**
+1. `billing-service` genera XML del comprobante con datos del emisor/receptor
+2. Firma XML usando certificado .p12 obtenido de Vault
+3. Envía XML firmado al endpoint de Recepción del SRI (SOAP)
+4. Recibe respuesta: `AUTORIZADO`, `RECHAZADO` o `DEVUELTO`
+5. Si `AUTORIZADO`: almacena número de autorización, fecha y XML autorizado
+6. Genera PDF con QR de validación y almacena en MinIO
+
+### Integración con HashiCorp Vault (Certificados .p12)
+
+**Secrets paths en Vault:**
+| Secret | Path |
+|--------|------|
+| Certificado .p12 | `secret/data/billing/{tenant_id}/certificate` |
+| Contraseña certificado | `secret/data/billing/{tenant_id}/certificate_password` |
+| Credenciales SRI (producción) | `secret/data/billing/{tenant_id}/sri_prod` |
+| Credenciales SRI (pruebas) | `secret/data/billing/{tenant_id}/sri_test` |
+
+**Lectura de certificado:**
+```java
+// billing-service lee certificado de Vault al iniciar
+VaultResponse response = vaultClient.logical()
+    .read("secret/data/billing/" + tenantId + "/certificate");
+byte[] p12Bytes = response.getData().get("data").get("value").getBytes(StandardCharsets.UTF_8);
+String password = vaultClient.logical()
+    .read("secret/data/billing/" + tenantId + "/certificate_password")
+    .getData().get("data").get("value");
+KeyStore ks = KeyStore.getInstance("PKCS12");
+ks.load(new ByteArrayInputStream(p12Bytes), password.toCharArray());
+```
+
+**Ciclo de vida del certificado:**
+- Admin sube .p12 → sistema valida PKCS#12 → extrae metadatos (titular, expiración) → guarda en Vault
+- Si certificado tiene <30 días de vigencia → alerta al Admin
+- Rotación: endpoint `POST /api/v1/billing/rotate-certificate` permite upload nuevo sin downtime
+- Cache en memoria con TTL de 1 hora; nunca se loguea la contraseña
+
+### Endpoints de API
+
+| Método | Path | Request | Response |
+|--------|------|---------|----------|
+| POST | `/api/v1/invoices/generate` | `{orderId, type: invoice|credit_note|withholding}` | `{invoice: {id, claveAcceso, secuencial, xml, estado: BORRADOR}}` |
+| POST | `/api/v1/invoices/{id}/sign` | — | `{xmlFirmado, signedAt}` |
+| POST | `/api/v1/invoices/{id}/send-to-sri` | — | `{estadoSri: AUTORIZADO|RECHAZADO|DEVUELTO, numeroAutorizacion?, mensajesError[]?}` |
+| GET | `/api/v1/invoices/{id}/status` | — | `{id, claveAcceso, numeroAutorizacion, estadoSri, fechaAutorizacion, ambiente}` |
+| GET | `/api/v1/invoices/{id}/authorized-xml` | — | XML file (stream) |
+| GET | `/api/v1/invoices/{id}/pdf` | — | PDF file (stream) |
+| GET | `/api/v1/invoices/{id}/qr` | — | PNG image (QR code) |
+| POST | `/api/v1/invoices/{invoiceId}/credit-note` | `{motivo, tipoNota, detalle[]}` | `{creditNote: {id, claveAcceso, estado}}` |
+| POST | `/api/v1/invoices/{invoiceId}/withholding` | `{impuestosRetenidos[], periodoFiscal}` | `{withholding: {id, claveAcceso, estado}}` |
+| GET | `/api/v1/invoices?page=0&size=20&estado=&dateFrom=&dateTo=` | — | `{content: [...], totalElements}` |
+| POST | `/api/v1/invoices/{id}/resend` | — | `{reenviado: true, estado}` |
+| GET | `/api/v1/invoices/sequences?establecimiento=&puntoEmision=` | — | `{secuencialFactura, secuencialNotaCredito, secuencialRetencion}` |
+| POST | `/api/v1/billing/rotate-certificate` | `{p12File, password}` | `{validUntil, titular, ruc}` |
+| GET | `/api/v1/billing/certificate-info` | — | `{titular, ruc, emision, expiracion, diasRestantes, emisor}` |
+
+### Modelo de Datos Clave
+
+**ComprobanteElectronico** (tabla `comprobante_electronico`)
+```
+id (UUID PK)
+tenant_id (UUID FK → tenant)
+order_id (UUID FK → order, nullable — referencia al pedido original)
+tipo_comprobante (ENUM: factura, nota_credito, nota_debito, retencion, guia_remision, liquidacion_compra)
+clave_acceso (VARCHAR 49, UNIQUE)
+establecimiento (VARCHAR 3)
+punto_emision (VARCHAR 3)
+secuencial (INT)
+numero_autorizacion (VARCHAR 49, nullable)
+fecha_emision (TIMESTAMP)
+fecha_autorizacion (TIMESTAMP, nullable)
+ambiente (ENUM: pruebas, produccion)
+estado_sri (ENUM: borrador, enviado, autorizado, rechazado, devuelto)
+xml_generado (TEXT) — XML sin firmar
+xml_firmado (TEXT) — XML con firma digital
+xml_autorizado (TEXT) — XML autorizado por SRI (si aplica)
+mensajes_error_sri (TEXT, nullable) — mensajes de error/rechazo del SRI
+pdf_url (VARCHAR 500, nullable) — MinIO path del PDF generado
+qr_url (VARCHAR 500, nullable) — MinIO path del QR PNG
+created_at (TIMESTAMP)
+updated_at (TIMESTAMP)
+```
+
+**ComprobanteItem** (líneas del comprobante)
+```
+id (UUID PK)
+comprobante_id (UUID FK → comprobante_electronico)
+codigo_principal (VARCHAR 50)
+descripcion (VARCHAR 300)
+cantidad (DECIMAL 12,4)
+precio_unitario (DECIMAL 12,4)
+descuento (DECIMAL 12,2, default 0)
+precio_total_sin_impuesto (DECIMAL 12,2)
+impuestos (JSONB) — [{codigo: "2", codigoPorcentaje: "2", tarifa: 15, base_imponible, valor}
+```
+
+**NotaCredito** (tabla `nota_credito`)
+```
+id (UUID PK)
+comprobante_id (UUID FK → comprobante_electronico — la nota misma)
+factura_original_clave_acceso (VARCHAR 49) — factura que corrige/anula
+factura_original_numero_autorizacion (VARCHAR 49)
+motivo (TEXT)
+tipo_nota (ENUM: devolucion, descuento, error_facturacion, anulacion)
+total (DECIMAL 12,2)
+created_at (TIMESTAMP)
+```
+
+**ComprobanteRetencion** (tabla `comprobante_retencion`)
+```
+id (UUID PK)
+comprobante_id (UUID FK → comprobante_electronico)
+factura_retenida_clave_acceso (VARCHAR 49)
+periodo_fiscal (VARCHAR 7) — formato YYYY-MM
+detalles (JSONB) — [{codigo: "1", codigoPorcentaje: "1", baseImponible, porcentajeRetener, valorRetenido}]
+total_retenido (DECIMAL 12,2)
+created_at (TIMESTAMP)
+```
+
+**InvoiceSriLog** (tabla `invoice_sri_logs` — auditoría de interacciones con SRI)
+```
+id (UUID PK)
+comprobante_id (UUID FK → comprobante_electronico)
+accion (ENUM: recepcion, autorizacion, reenvio)
+request_xml (TEXT)
+response_xml (TEXT)
+http_status (INT)
+estado_sri (VARCHAR 20)
+tiempo_ms (INT)
+error_message (TEXT, nullable)
+created_at (TIMESTAMP)
+```
+
+### Reglas de Negocio Técnicas
+1. **Generación de clave de acceso:** 49 dígitos según fórmula SRI: `Fecha(8) + RUC_emisor(13) + TipoComprobante(2) + Serie(4) + Secuencial(9) + CódigoNumérico(8) + TipoEmisión(1) + DígitoVerificador(1)`. Código numérico con `SecureRandom`, dígito verificador con módulo 11.
+2. **Secuencial único:** por tenant + establecimiento + punto de emisión. Consecutivo e inmutable.
+3. **Flujo de estados:** `BORRADOR → ENVIADO → AUTORIZADO/RECHAZADO/DEVUELTO`. Comprobantes autorizados son inmutables (no editable, no eliminable).
+4. **Reintentos SRI:** máximo 3 intentos con backoff exponencial (2s → 4s → 8s) ante timeouts. Errores de negocio (`RECHAZADO`, `DEVUELTO`) no se reenvían automáticamente.
+5. **Nota de crédito:** vincula obligatoriamente una factura autorizada. El secuencial es independiente pero consecutivo por establecimiento+punto.
+6. **Comprobante de retención:** vincula una factura autorizada. Porcentajes configurables por el tenant según actividad económica.
+7. **QR de validación:** URL del SRI: `https://verififact.sri.gob.ec/cgi-bin/cfaces/CeFacSWSPLE?cmp={claveAcceso}`. Tamaño mínimo 3cm x 3cm en el PDF.
+8. **Certificado .p12:** leído de Vault, cacheado en memoria 1 hora, nunca logueado. Si expira → error claro al intentar firmar.
+9. **Ambiente:** PRUEBAS incluye sello "SOLO FINES DE PRUEBA" en PDF. URLs del SRI son separadas por ambiente.
+10. **Integración con orders-service:** al confirmar pedido (estado `CONFIRMED`), se publica evento `order.confirmed` → `billing-service` genera factura electrónica automáticamente.
+
+### Dependencias con Otros Servicios
+- **HashiCorp Vault:** Almacena certificado .p12 y credenciales SRI del tenant.
+- **orders-service:** Recibe evento `order.confirmed` para generar factura automática.
+- **crm-service:** Consulta datos del cliente (RUC/cédula, nombre, dirección) para el receptor del comprobante.
+- **auth-service:** Valida tenant activo y configura datos del contribuyente (RUC, razón social, establecimiento).
+- **MinIO:** Almacena XMLs autorizados, PDFs de facturas y PNGs de QR.
+- **RabbitMQ:** Publica eventos `invoice.authorized`, `invoice.voided`, `invoice.rejected` para `notifications-service`.
+- **notifications-service:** Consume eventos para notificar al tenant sobre autorización/rechazo de comprobantes.
+
+---
+
+## Epic 10: Configuración de Facturación Electrónica — billing-config-service
+
+### Descripción Técnica
+El `billing-config-service` gestiona la configuración completa del contribuyente ante el SRI: datos fiscales del emisor (RUC, razón social, dirección, establecimiento, punto de emisión), upload y validación del certificado digital .p12/.pfx, almacenamiento seguro en HashiCorp Vault, selección del proveedor de firma electrónica, generación de clave de acceso y gestión de ambientes (pruebas/producción). Es el módulo de configuración que alimenta al `billing-service` con todos los datos necesarios para emitir comprobantes electrónicos válidos.
+
+### Microservicio Responsable
+- **billing-config-service** (Spring Boot 3.2 + PostgreSQL + HashiCorp Vault + PKCS#12 Validation)
+
+### Endpoints de API
+
+| Método | Path | Request | Response |
+|--------|------|---------|----------|
+| GET | `/api/v1/billing-config/contribuyente` | — | `{ruc, razonSocial, nombreComercial, direccionMatricial, establecimiento, puntoEmision, tipoContribuyente, ambiente}` |
+| PUT | `/api/v1/billing-config/contribuyente` | `{ruc, razonSocial, nombreComercial, direccionMatricial, establecimiento, puntoEmision, tipoContribuyente, ambiente}` | `{contribuyente}` |
+| POST | `/api/v1/billing-config/certificate/upload` | multipart: `{file (.p12/.pfx), password}` | `{titular, ruc, emision, expiracion, emisor, valido: true}` |
+| GET | `/api/v1/billing-config/certificate` | — | `{titular, ruc, emision, expiracion, emisor, diasRestantes, almacen: vault}` |
+| DELETE | `/api/v1/billing-config/certificate` | — | `{eliminado: true}` |
+| POST | `/api/v1/billing-config/certificate/validate` | multipart: `{file, password}` | `{valido, titular, ruc, emision, expiracion, errores[]?}` |
+| GET | `/api/v1/billing-config/providers` | — | `{providers: [{id, name, protocol, endpoint, configured}]}` |
+| PUT | `/api/v1/billing-config/provider` | `{providerId, endpoint?, timeout?}` | `{provider}` |
+| POST | `/api/v1/billing-config/provider/test` | — | `{conexionExitosa, latencia, mensaje}` |
+| GET | `/api/v1/billing-config/ambiente` | — | `{ambiente: pruebas|produccion, sriEndpoint, indicador}` |
+| PUT | `/api/v1/billing-config/ambiente` | `{ambiente, motivo?}` | `{ambiente, checklist: {certificadoVigente, rucActivo, conexionSri}}` |
+| GET | `/api/v1/billing-config/clave-acceso/generate` | `{tipoComprobante, secuencial}` | `{claveAcceso}` |
+| GET | `/api/v1/billing-config/audit` | — | `{content: [{accion, usuario, fecha, valoresAnteriores, valoresNuevos}]}` |
+
+### Modelo de Datos Clave
+
+**ContribuyenteConfig** (tabla `contribuyente_config`)
+```
+id (UUID PK)
+tenant_id (UUID FK → tenant, UNIQUE)
+ruc (VARCHAR 13) — validado con dígito verificador SRI
+razon_social (VARCHAR 160)
+nombre_comercial (VARCHAR 160, nullable)
+direccion_matricial (TEXT)
+establecimiento (VARCHAR 3) — código de establecimiento (ej: "001")
+punto_emision (VARCHAR 3) — punto de emisión (ej: "001")
+tipo_contribuyente (ENUM:自然, juridico, contribuyente_especial)
+ambiente_sri (ENUM: pruebas, produccion, default: pruebas)
+activo (BOOLEAN, default true)
+created_at (TIMESTAMP)
+updated_at (TIMESTAMP)
+```
+
+**CertificadoDigital** (tabla `certificado_digital`)
+```
+id (UUID PK)
+tenant_id (UUID FK → tenant, UNIQUE)
+vault_path_certificate (VARCHAR 500) — path en Vault: secret/data/billing/{tenant}/certificate
+vault_path_password (VARCHAR 500) — path en Vault: secret/data/billing/{tenant}/certificate_password
+titular (VARCHAR 200) — extraído del certificado
+ruc_titular (VARCHAR 13) — extraído del certificado
+emisor (VARCHAR 200) — CA que emitió el certificado
+fecha_emision (TIMESTAMP)
+fecha_expiracion (TIMESTAMP)
+formato (ENUM: pkcs12) — .p12 o .pfx
+activo (BOOLEAN, default true)
+uploaded_by (UUID FK → user)
+created_at (TIMESTAMP)
+updated_at (TIMESTAMP)
+```
+
+**ProveedorFirma** (tabla `proveedor_firma`)
+```
+id (UUID PK)
+tenant_id (UUID FK → tenant)
+nombre (VARCHAR 50) — BCE, SDS, ANF Ecuador, Ecuacert, GlobalSign, DigiCert
+protocolo (ENUM: soap, rest)
+endpoint_url (VARCHAR 500)
+timeout_ms (INT, default 30000)
+configuracion_adicional (JSONB) — parámetros específicos del proveedor
+activo (BOOLEAN, default true)
+created_at (TIMESTAMP)
+updated_at (TIMESTAMP)
+```
+
+**AuditLogFacturacion** (tabla `audit_log_facturacion`)
+```
+id (UUID PK)
+tenant_id (UUID FK → tenant)
+accion (ENUM: crear_contribuyente, actualizar_contribuyente, subir_certificado, eliminar_certificado, cambiar_proveedor, cambiar_ambiente)
+usuario_id (UUID FK → user)
+valores_anteriores (JSONB, nullable)
+valores_nuevos (JSONB)
+ip_address (VARCHAR 45)
+created_at (TIMESTAMP)
+```
+
+### Proveedores de Firma Electrónica Soportados
+
+| Proveedor | Protocolo | URL (Producción) | Notas |
+|-----------|-----------|-------------------|-------|
+| Banco Central del Ecuador (BCE) | SOAP | `https://cel.sri.gob.ec/firmaelectronica/services/Firmaelectronica?wsdl` | Emisor oficial Ecuador |
+| Security Data (SDS) | SOAP | Configurado por proveedor | Certificados ICA |
+| ANF Ecuador | REST | Configurado por proveedor | ANF Academy |
+| Ecuacert | SOAP | Configurado por proveedor | Autoridad certificadora nacional |
+| GlobalSign | REST | Configurado por proveveedor | CA internacional |
+| DigiCert | REST | Configurado por proveedor | CA internacional |
+
+### Reglas de Negocio Técnicas
+1. **Validación RUC:** algoritmo de dígito verificador del SRI. Rechaza RUCs inválidos antes de guardar.
+2. **Upload certificado .p12:** validación PKCS#12 completa (estructura, presencia de certificado + clave privada, formato). Máx 5 MB. Solo rol Admin.
+3. **Almacenamiento en Vault:** certificado y contraseña como secrets separados. Nunca en base de datos, nunca en texto plano.
+4. **Expiración certificado:** alerta a 60 días de expiración vía email/WhatsApp. Rechaza firma si expirado.
+5. **Cambio de ambiente:** de PRUEBAS a PRODUCCIÓN requiere checklist: certificado vigente (>30 días), RUC activo, conexión con receptor SRI exitosa. Reversa requiere confirmación + motivo.
+6. **Indicador visual:** badge "PRUEBAS" (amarillo) / "PRODUCCIÓN" (verde) en todas las pantallas de facturación.
+7. **Audit trail:** todos los cambios de configuración fiscal se registran con usuario, timestamp, valores anteriores/nuevos.
+8. **Multi-tenancy:** cada tenant tiene su propia configuración de contribuyente, certificado y proveedor de firma.
+9. **Generación de clave de acceso:** módulo standalone con `SecureRandom` para código numérico + algoritmo módulo 11 para dígito verificador. Cobertura de tests con claves de prueba del SRI.
+10. **Rotación de certificado:** `POST /api/v1/billing-config/certificate/upload` con nuevo .p12 → validar → actualizar Vault → invalidar cache → log auditoría. Sin downtime.
+
+### Dependencias con Otros Servicios
+- **HashiCorp Vault:** Almacenamiento seguro de certificado .p12 y contraseña. Paths: `secret/data/billing/{tenant_id}/certificate` y `secret/data/billing/{tenant_id}/certificate_password`.
+- **billing-service:** Lee configuración del contribuyente y certificado para generar/firmar/enviar comprobantes.
+- **auth-service:** Valida tenant y usuario Admin para operaciones de configuración fiscal.
+- **RabbitMQ:** Publica evento `billing-config.updated` cuando cambian datos del contribuyente o certificado.
+- **notifications-service:** Notifica al Admin sobre expiración de certificado y cambios de ambiente.
+
+---
+
+## Integración Chatbot con N8N (Epic 8 extensión)
+
+### Descripción Técnica
+El chatbot del sitio web de EGIT Consultoría se integra con N8N para capturar prospectos y enviarlos directamente al flujo de automatización. Cuando un visitante completa el formulario del chatbot, se envía un POST al webhook de N8N que procesa el prospecto (guardar en BD, enviar email de bienvenida, notificar al equipo por WhatsApp).
+
+### Webhook de N8N
+
+**Endpoint:**
+```
+POST https://n8n.egit.site/webhook/egit-prospectos
+```
+
+**Headers:**
+```
+Content-Type: application/json
+X-Webhook-Secret: {secret_configurado_en_N8N}
+```
+
+### Modelo de Datos: Prospecto
+
+**Prospecto** (payload del webhook)
+```json
+{
+  "name": "Juan Pérez",
+  "email": "juan@empresa.com",
+  "phone": "+593984526396",
+  "interest": "Automatización con IA",
+  "source": "chatbot_web",
+  "timestamp": "2026-03-17T21:30:00-05:00",
+  "metadata": {
+    "page_url": "https://egit.site/servicios",
+    "utm_source": "google",
+    "utm_medium": "cpc",
+    "session_id": "abc123"
+  }
+}
+```
+
+**Campos obligatorios:** `name`, `email`
+**Campos opcionales:** `phone`, `interest`, `source`, `metadata`
+
+### Flujo de Datos
+
+```
+Chatbot Web → POST webhook N8N → Flujo N8N:
+  ├── Guardar prospecto en BD (PostgreSQL)
+  ├── Enviar email de bienvenida al prospecto
+  ├── Notificar al equipo por WhatsApp (Evolution API)
+  └── Crear cliente en CRM AutoFlow (opcional, vía API)
+```
+
+### Endpoints Internos (AutoFlow → Chatbot)
+
+| Método | Path | Request | Response |
+|--------|------|---------|----------|
+| POST | `/api/v1/chatbot/prospect` | `{name, email, phone?, interest?, source?, metadata{}}` | `{prospectId, enviado: true}` |
+| GET | `/api/v1/chatbot/prospects?page=0&size=20` | — | `{content: [...], totalElements}` |
+| POST | `/api/v1/chatbot/prospects/{id}/convert` | `{clientId?}` | `{convertido: true, clientId}` |
+
+### Modelo de Datos (MongoDB)
+
+**Prospect** (colección `prospects`)
+```
+_id (ObjectId PK)
+name (String, required)
+email (String, required, index)
+phone (String, nullable)
+interest (String, nullable)
+source (String, default: "chatbot_web")
+status (String: new, contacted, qualified, converted, lost)
+metadata (Object) — {pageUrl, utmSource, utmMedium, sessionId}
+n8n_webhook_response (Object, nullable) — respuesta de N8N
+converted_to_client_id (UUID, nullable) — vinculado al CRM
+converted_at (Date, nullable)
+created_at (Date)
+updated_at (Date)
+```
+
+### Reglas de Negocio Técnicas
+1. El email del prospecto es unique en la colección `prospects`; si ya existe, se actualiza el timestamp y el interest.
+2. El phone se normaliza al formato internacional con código de país (Ecuador: +593).
+3. Los prospectos con `status: new` se muestran en el dashboard del Admin.
+4. La conversión a cliente del CRM es manual (Admin hace clic en "Convertir a Cliente") o automática vía N8N.
+5. Los webhooks fallidos se reintentan 3 veces con backoff; se registran en log para diagnóstico.
+
+### Dependencias con Otros Servicios
+- **N8N (externo):** `https://n8n.egit.site/webhook/egit-prospectos` — recibe prospectos y ejecuta flujos de automatización.
+- **crm-service:** Conversión opcional de prospecto a cliente en el CRM.
+- **notifications-service:** Notifica al equipo cuando llega un nuevo prospecto (WhatsApp + email).
+- **MongoDB:** Almacena colección `prospects` con documentos flexibles.
+
+---
+
 ## Resumen de Dependencias entre Servicios
 
 ```
@@ -895,27 +1282,43 @@ updated_at (TIMESTAMP)
     └─────┬─────┘   └─────┬─────┘   └─────┬─────┘
           │               │               │
           │         ┌─────▼─────┐   ┌─────▼─────┐
-          │         │ whatsapp  │   │   report  │
-          │         │  service  │──►│  service  │
-          │         └─────┬─────┘   └───────────┘
-          │               │
-    ┌─────▼─────┐   ┌────▼──────┐
-    │  notif.   │   │ appointment│
-    │  service  │◄──┤  service  │
-    └───────────┘   └───────────┘
+          │         │ whatsapp  │   │  billing  │
+          │         │  service  │   │  service  │
+          │         └─────┬─────┘   └─────┬─────┘
+          │               │               │
+    ┌─────▼─────┐   ┌────▼──────┐   ┌─────▼──────┐
+    │  notif.   │   │ appointment│   │  billing   │
+    │  service  │◄──┤  service  │   │  config    │
+    └─────┬─────┘   └───────────┘   │  service   │
+          │                         └─────┬──────┘
+          │                               │
+    ┌─────▼─────┐                         │
+    │  reports  │◄────────────────────────┘
+    │  service  │
+    └───────────┘
 
     ──►  consume evento     ◄──  publica evento
-    
+
+    Integraciones Externas:
+    ├── Evolution API (WhatsApp) — evolutionapi.egit.site
+    ├── SRI Web Services (Facturación Electrónica) — cel.sri.gob.ec / celcer.sri.gob.ec
+    ├── HashiCorp Vault (Secretos: certificados .p12, API keys) — vault.egit.site
+    ├── Firebase Cloud Messaging (Push Notifications)
+    ├── Google Calendar API (Citas)
+    ├── N8N (Automatizaciones + Chatbot Prospectos) — n8n.egit.site
+    └── SMTP/SendGrid/AWS SES (Emails transaccionales)
+
     Infraestructura compartida:
-    ├── PostgreSQL (auth, crm, orders, appointments, reports)
-    ├── MongoDB (whatsapp, notifications, reports)
+    ├── PostgreSQL (auth, crm, orders, appointments, reports, billing)
+    ├── MongoDB (whatsapp, notifications, reports, prospects)
     ├── Redis (cache, rate limit, locks, token blocklist)
     ├── RabbitMQ (event bus)
-    └── MinIO (archivos: invoices, avatars, media, exports)
+    └── MinIO (archivos: invoices, avatars, media, exports, templates)
 ```
 
 ---
 
-*Documento generado por Axel (Scrum Master, AutoFlow — EGIT Consultoría)*  
-*Basado en ADR-001 v2.0, ADR-002 v2.2 y 52 Historias de Usuario*  
+*Documento generado por Axel (Scrum Master, AutoFlow — EGIT Consultoría) / Doc (Documentador de Arquitectura)*
+*Basado en ADR-001 v2.0, ADR-002 v2.2 y 65 Historias de Usuario*
 *Fecha: 2026-03-17*
+*Actualizado: 2026-03-17 — Epic 9 (billing-service), Epic 10 (configuración contribuyente), integración chatbot N8N*

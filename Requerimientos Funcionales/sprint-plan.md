@@ -1,9 +1,10 @@
 # Sprint Plan — AutoFlow
-**Versión:** 1.0  
-**Fecha:** 2026-03-17  
-**Autor:** Axel (Scrum Master, EGIT Consultoría)  
-**Duración del Sprint:** 2 semanas (10 días laborables)  
-**Velocidad estimada:** 40-50 SP por sprint  
+**Versión:** 1.1
+**Fecha:** 2026-03-17
+**Autor:** Axel (Scrum Master, EGIT Consultoría) / Doc (Documentador de Arquitectura)
+**Changelog v1.1:** Agregado Sprint 8 (Facturación Electrónica SRI) y Sprint 9 (Configuración Contribuyente) para Epics 9-10
+**Duración del Sprint:** 2 semanas (10 días laborables)
+**Velocidad estimada:** 40-50 SP por sprint
 **Metodología:** Scrum con daily standups, sprint planning, review y retrospective
 
 ---
@@ -12,10 +13,11 @@
 
 | Parámetro | Valor |
 |-----------|-------|
-| **Total HUs** | 52 |
-| **Total Story Points** | 293 |
-| **Sprints de desarrollo** | 7 + 1 (setup) = 8 sprints |
-| **Duración total** | 16 semanas (~4 meses) |
+| **Total HUs** | 66 |
+| **Total Story Points** | 379 |
+| **Total Epics** | 10 + 1 extensión (Chatbot N8N) |
+| **Sprints de desarrollo** | 7 + 1 (setup) + 2 (facturación) = 10 sprints |
+| **Duración total** | 20 semanas (~5 meses) |
 | **Team size estimado** | 3-4 developers (2 backend, 1-2 frontend) + 1 QA |
 
 ---
@@ -246,6 +248,65 @@
 
 ---
 
+## Sprint 8 — Facturación Electrónica SRI (Semana 17-18)
+
+**Objetivo:** Generación completa de comprobantes electrónicos: factura, nota de crédito, retención, firma XML, envío al SRI, autorización y generación de PDF con QR de validación.
+
+### Historias de Usuario
+
+| HU | Título | Epic | SP |
+|----|--------|------|:--:|
+| HU-053 | Generar factura electrónica con clave de acceso | Epic 9 | 8 |
+| HU-054 | Enviar comprobante al SRI para autorización | Epic 9 | 8 |
+| HU-055 | Recibir y almacenar factura autorizada con número de autorización | Epic 9 | 5 |
+| HU-056 | Generar XML firmado electrónicamente | Epic 9 | 8 |
+| HU-057 | Generar nota de crédito electrónica | Epic 9 | 8 |
+| HU-058 | Generar comprobante de retención electrónico | Epic 9 | 8 |
+| HU-059 | Cliente valida factura con código QR en web del SRI | Epic 9 | 5 |
+| **TOTAL SPRINT 8** | | **7 HUs** | **50 SP** |
+
+### Objetivo del Sprint
+> "El sistema genera comprobantes electrónicos completos (facturas, notas de crédito, retenciones), los firma con certificado digital, los envía al SRI para autorización, y genera PDFs con QR de validación que el cliente puede verificar."
+
+### Dependencias
+- billing-service operativo con PostgreSQL + integración SRI SOAP
+- HashiCorp Vault configurado para almacenar certificados .p12
+- Integración con orders-service (evento `order.confirmed`)
+- MinIO para almacenar XMLs autorizados, PDFs y QRs
+- Integración con crm-service para datos del receptor (RUC/cédula, nombre, dirección)
+- Google Cloud SOAP client para web services del SRI
+
+---
+
+## Sprint 9 — Configuración Contribuyente + Chatbot N8N (Semana 19-20)
+
+**Objetivo:** Configuración completa del contribuyente ante el SRI: datos fiscales, upload de certificado .p12, selección de proveedor de firma, gestión de ambientes. Además, integración del chatbot web con N8N para captura de prospectos.
+
+### Historias de Usuario
+
+| HU | Título | Epic | SP |
+|----|--------|------|:--:|
+| HU-060 | Configurar datos del contribuyente | Epic 10 | 5 |
+| HU-061 | Subir y configurar certificado de firma electrónica (.p12/.pfx) | Epic 10 | 5 |
+| HU-062 | Almacenar certificado y contraseña en HashiCorp Vault | Epic 10 | 8 |
+| HU-063 | Seleccionar y configurar proveedor de firma electrónica | Epic 10 | 3 |
+| HU-064 | Generar clave de acceso de 49 dígitos según normativa SRI | Epic 10 | 5 |
+| HU-065 | Configurar ambiente SRI (pruebas → producción) | Epic 10 | 5 |
+| HU-066 | Integración chatbot con N8N (prospectos) | Epic 8 ext. | 5 |
+| **TOTAL SPRINT 9** | | **7 HUs** | **36 SP** |
+
+### Objetivo del Sprint
+> "El Admin configura todos los datos fiscales de su empresa, sube el certificado digital, selecciona proveedor de firma y gestiona la transición a producción del SRI. Además, el chatbot web captura prospectos y los envía a N8N para automatización."
+
+### Dependencias
+- billing-config-service operativo con integración HashiCorp Vault
+- Vault desplegado y accesible para lectura/escritura de secrets
+- Proveedores de firma electrónica disponibles (BCE, SDS, etc.)
+- N8N instance: `https://n8n.egit.site` con workflow `egit-prospectos`
+- MongoDB para colección `prospects`
+
+---
+
 ## Resumen de Sprints
 
 | Sprint | Semanas | HUs | SP | Objetivo Principal |
@@ -258,9 +319,11 @@
 | **Sprint 5** | 11-12 | 8 | 45 | Notificaciones push/email + disponibilidad citas |
 | **Sprint 6** | 13-14 | 8 | 47 | Citas completo + Google Calendar + N8N |
 | **Sprint 7** | 15-16 | 6 | 39 | Reportes + dashboard + rate limiting |
-| **TOTAL** | **16 semanas** | **51 HUs** | **340 SP** | **MVP completo** |
+| **Sprint 8** | 17-18 | 7 | 50 | Facturación electrónica SRI (facturas, NC, retenciones) |
+| **Sprint 9** | 19-20 | 7 | 36 | Configuración contribuyente + certificado + chatbot N8N |
+| **TOTAL** | **20 semanas** | **66 HUs** | **379 SP** | **MVP completo con facturación electrónica + chatbot** |
 
-> **Nota:** HU-046 fue incluida en Sprint 1 (parte de configuración base). Total: 52 HUs incluidas en los sprints.
+> **Nota:** Epics 1-8 cubren 52 HUs (Sprints 1-7). Epic 9 agrega 7 HUs (Sprint 8). Epic 10 agrega 6 HUs (Sprint 9). Total: 65 HUs incluidas en los sprints.
 
 ---
 
@@ -346,13 +409,37 @@ Sprint 0 (infra)
     │        │                 │
     │        │                 ├──► Sprint 6 (Citas + N8N + GCal)
     │        │                 │
-    │        └─────────────────┴──► Sprint 7 (Reportes + Rate Limit)
+    │        │                 └──► Sprint 7 (Reportes + Rate Limit)
+    │        │                          │
+    │        │                          ├──► Sprint 8 (Facturación Electrónica SRI)
+    │        │                          │        │
+    │        │                          │        └──► Sprint 9 (Config Contribuyente + Chatbot N8N)
+    │        │                          │
+    │        └──────────────────────────┴──► MVP Listo 🚀
     │
-    └── MVP Listo 🚀
+    └── Inversión en infraestructura
 ```
+
+### Distribución por Epic
+
+| Epic | Nombre | HUs | SP | Sprints |
+|------|--------|:---:|:--:|---------|
+| Epic 1 | Autenticación & Usuarios | 8 | 42 | Sprint 1 |
+| Epic 2 | CRM (Clientes, Pipeline) | 7 | 34 | Sprint 2 |
+| Epic 3 | Pedidos & Catálogo | 6 | 39 | Sprint 3 |
+| Epic 4 | WhatsApp (Evolution API) | 6 | 33 | Sprint 4 |
+| Epic 5 | Notificaciones (FCM + Email) | 5 | 27 | Sprint 5 |
+| Epic 6 | Sistema de Citas (Google Calendar) | 8 | 47 | Sprint 5-6 |
+| Epic 7 | Reportes & Dashboard | 5 | 34 | Sprint 7 |
+| Epic 8 | Configuración Multi-tenant | 7 | 37 | Sprints 1-6 |
+| Epic 8 ext | Integración Chatbot N8N | 1 | 5 | Sprint 9 |
+| Epic 9 | Facturación Electrónica (SRI) | 7 | 50 | Sprint 8 |
+| Epic 10 | Configuración Facturación Electrónica | 6 | 31 | Sprint 9 |
+| **TOTAL** | | **66** | **379** | **10 sprints** |
 
 ---
 
-*Documento generado por Axel (Scrum Master, AutoFlow — EGIT Consultoría)*  
-*Basado en 52 Historias de Usuario de Maya*  
+*Documento generado por Axel (Scrum Master, AutoFlow — EGIT Consultoría) / Doc (Documentador de Arquitectura)*
+*Basado en 65 Historias de Usuario de Maya (Epics 1-10)*
 *Fecha: 2026-03-17*
+*Actualizado: 2026-03-17 — Agregados Sprint 8 (Facturación SRI) y Sprint 9 (Config Contribuyente + Chatbot)*

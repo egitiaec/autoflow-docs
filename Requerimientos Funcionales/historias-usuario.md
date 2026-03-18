@@ -1,5 +1,5 @@
 # Historias de Usuario — AutoFlow
-**Versión:** 1.2  
+**Versión:** 1.3
 **Fecha:** 2026-03-17  
 **Autor:** Maya (Project Manager, EGIT Consultoría)  
 **Referencia:** ADR-001 v2.0 + ADR-002 v2.2  
@@ -1425,6 +1425,39 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 
 ---
 
+## Epic 8 (extensión): Integración Chatbot Web con N8N
+
+> **Servicio:** `chatbot-service` (middleware) + N8N (externo: n8n.egit.site)  
+> **Webhook:** `https://n8n.egit.site/webhook/egit-prospectos`  
+> **Descripción:** Integración del chatbot del sitio web de EGIT con N8N para capturar prospectos y enviarlos al flujo de automatización (notificación al equipo, email de bienvenida, creación en CRM).
+
+---
+
+### HU-066: Integración del chatbot con N8N (webhook de prospectos)
+**Epic:** Epic 8 extensión — Integración Chatbot con N8N
+**Título:** Envío de prospectos capturados por el chatbot a N8N
+
+**Historia:**  
+Como **Visitante del sitio web**, quiero interactuar con el chatbot de EGIT y dejar mis datos de contacto, para que el equipo me contacte con información sobre sus servicios de IA y automatización.
+
+**Criterios de Aceptación:**
+1. Cuando el visitante completa el formulario del chatbot, el sistema envía un POST al webhook `https://n8n.egit.site/webhook/egit-prospectos` con el modelo: `{name, email, phone, interest, source, timestamp}`.
+2. Los campos obligatorios son `name` y `email`; `phone`, `interest` y `source` son opcionales.
+3. El campo `source` tiene valor por defecto `"chatbot_web"` y puede incluir UTM parameters del metadata.
+4. Si el webhook de N8N responde con error, el sistema reintenta 3 veces con backoff exponencial y registra el fallo en log.
+5. El prospecto se almacena en MongoDB (colección `prospects`) con status `new` y se puede consultar desde el panel del Admin.
+6. El email del prospecto es único en la colección; si ya existe, se actualiza el timestamp y el interés.
+7. El Admin puede convertir un prospecto a cliente del CRM con un clic ("Convertir a Cliente").
+
+**Prioridad:** Media  
+**Story Points:** 5
+
+---
+
+**Subtotal Epic 8 ext: 1 HU | 5 Story Points**
+
+---
+
 ## Resumen General
 
 ### Totales por Epic
@@ -1439,9 +1472,10 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 | Epic 6 | Sistema de Citas (Google Calendar) | 8 | 47 |
 | Epic 7 | Reportes & Dashboard | 5 | 34 |
 | Epic 8 | Configuración Multi-tenant | 7 | 37 |
+| Epic 8 ext | Integración Chatbot N8N | 1 | 5 |
 | Epic 9 | Facturación Electrónica (SRI Ecuador) | 7 | 50 |
 | Epic 10 | Configuración de Facturación Electrónica | 6 | 31 |
-| **TOTAL** | | **65** | **374** |
+| **TOTAL** | | **66** | **379** |
 
 ---
 
@@ -1449,10 +1483,10 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 
 | Prioridad | # HUs | Story Points |
 |-----------|:-----:|:------------:|
-| 🔴 Alta | 48 | 284 |
+| 🔴 Alta | 51 | 289 |
 | 🟡 Media | 15 | 78 |
 | 🟢 Baja | 2 | 12 |
-| **TOTAL** | **65** | **374** |
+| **TOTAL** | **66** | **379** |
 
 ---
 
@@ -1482,7 +1516,7 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 | Sprint 6 — Citas completo | HU-036 a HU-040 + HU-049, HU-051 | ~42 |
 | Sprint 7 — Reportes + Config | HU-041 a HU-045 + HU-052 | ~39 |
 | Sprint 8 — Facturación Electrónica (SRI) | HU-053 a HU-059 (Epic 9 completo) | ~50 |
-| Sprint 9 — Configuración Facturación | HU-060 a HU-065 (Epic 10 completo) | ~31 |
+| Sprint 9 — Configuración Facturación + Chatbot | HU-060 a HU-065 + HU-066 | ~36 |
 
 **Estimación total: ~9 sprints (~18 semanas) para MVP completo**
 
@@ -1491,5 +1525,5 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 *Documento generado por Maya (Project Manager, AutoFlow — EGIT Consultoría)*  
 *Basado en ADR-001 v2.0 y ADR-002 v2.2*  
 *Fecha: 2026-03-17*  
-*Actualizado: 2026-03-17 — Epic 10 (Configuración de Facturación Electrónica) agregado*  
+*Actualizado: 2026-03-17 — Epic 10 (Configuración de Facturación Electrónica) + HU-066 (Chatbot N8N) agregados*  
 *Para revisión y aprobación de: Eduardo Guerra (CEO, EGIT)*
