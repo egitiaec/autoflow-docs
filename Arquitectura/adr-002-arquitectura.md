@@ -4,7 +4,7 @@
 |-------|-------|
 | **Estado** | ✅ Aprobado — Eduardo Guerra, 2026-03-17 |
 | **Fecha** | 2026-03-16 |
-| **Última revisión** | 2026-03-17 (Archy — v2.2: Evolution API, FCM, appointment-service, specs iniciales) |
+| **Última revisión** | 2026-03-17 (Archy — v2.3: billing-service para Facturación Electrónica SRI, Epic 9+10) |
 | **Decisor** | Eduardo (CEO) |
 | **Arquitecto** | Archy — Arquitecto en Jefe, EGIT |
 | **Proyecto** | AutoFlow — Plataforma de CRM + WhatsApp para PYMEs ecuatorianas |
@@ -18,6 +18,7 @@
 | 2.0 | 2026-03-16 | Archy | Reescritura completa con arquitectura de microservicios |
 | 2.1 | 2026-03-17 | Archy | Audit de completitud: resolución de 6 gaps arquitecturales |
 | **2.2** | **2026-03-17** | **Archy** | **4 cambios por revisión de Eduardo: (1) whatsapp-service migrado a Evolution API self-hosted; (2) FCM especificado como proveedor de push notifications; (3) Sección de Especificaciones Funcionales y Técnicas iniciales; (4) Nuevo módulo appointment-service (citas)** |
+| **2.3** | **2026-03-17** | **Archy** | **Nuevo microservicio billing-service (puerto 8087) para Facturación Electrónica SRI — Epics 9 y 10. Appointment-service reasignado a puerto 8088. Eventos RabbitMQ para facturación. N8N webhook para prospectos del chatbot.** |
 
 ---
 
@@ -65,9 +66,11 @@ AutoFlow es una plataforma multi-tenant SaaS que permite a PYMEs ecuatorianas:
 | **CRM** | Clientes, interacciones, pipeline de ventas | `crm-service` |
 | **Pedidos** | Creación, estados, facturación, catálogo | `orders-service` |
 | **WhatsApp** | Mensajería vía Evolution API, conversaciones | `whatsapp-service` |
-| **Citas** | Reservas, disponibilidad, recordatorios | `appointment-service` *(nuevo)* |
+| **Citas** | Reservas, disponibilidad, recordatorios | `appointment-service` |
 | **Notificaciones** | Email, Push (FCM), WhatsApp | `notifications-service` |
 | **Reportes** | Dashboard, KPIs, exportaciones | `reports-service` |
+| **Facturación Electrónica (SRI)** | XML firmado, autorización SRI, retenciones, notas de crédito, QR | `billing-service` *(nuevo)* |
+| **Configuración Facturación** | Datos contribuyente, certificados .p12, Vault, proveedores | `billing-service` |
 | **Automatización** | Flujos configurables por cliente | `n8n` |
 
 #### Flujos Básicos
@@ -193,9 +196,14 @@ Evento interno (mensaje nuevo, cita, pedido)
 └──────────────┘ └──────────┘ └──────────────┘ └──────────────┘
 ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌───────┐
 │appointment-  │ │notifications-│ │reports-svc   │ │  N8N  │
-│   svc (8087) │ │   svc (8085) │ │   (8086)     │ │(5678) │
+│   svc (8088) │ │   svc (8085) │ │   (8086)     │ │(5678) │
 │  PostgreSQL  │ │  MongoDB     │ │ PG + MongoDB │ │       │
 └──────────────┘ └──────────────┘ └──────────────┘ └───────┘
+┌──────────────┐
+│billing-svc   │
+│   (8087)     │
+│ PostgreSQL   │
+└──────────────┘
 
                     ┌────────────────────────────┐
                     │  Evolution API (external)  │
@@ -330,7 +338,7 @@ EVOLUTION_WEBHOOK_SECRET=<webhook-secret>
 EVOLUTION_WEBHOOK_URL=https://autoflow.egit.site/api/v1/webhook/evolution
 ```
 
-#### `appointment-service` — Sistema de Citas *(NUEVO — v2.2)*
+#### `appointment-service` — Sistema de Citas *(reasinado a :8088 en v2.3)*
 
 > **Nuevo módulo v2.2.** Gestión completa de citas para negocios como restaurantes, barberías, consultorios y clínicas. Verifica disponibilidad en tiempo real vía Google Calendar API y/o APIs propias del negocio cliente.
 
@@ -383,7 +391,7 @@ EVOLUTION_WEBHOOK_URL=https://autoflow.egit.site/api/v1/webhook/evolution
   - `GET/POST /appointments/services` — tipos de servicio (duración, nombre, precio)
   - `GET /appointments/upcoming` — próximas citas (para recordatorios)
 
-- **Puerto:** `8087`
+- **Puerto:** `8088`
 
 **Reglas de negocio:**
 
@@ -491,6 +499,125 @@ FCM_PROJECT_ID=<firebase-project-id>
   - `GET /reports/export?format=csv|pdf`
 - **Puerto:** `8086`
 
+#### `billing-service` — Facturación Electrónica SRI *(NUEVO — v2.3)*
+
+> **Nuevo módulo v2.3.** Generación de comprobantes electrónicos conforme a la normativa del SRI de Ecuador. Cubre Epics 9 y 10: facturas, notas de crédito, comprobantes de retención, firma electrónica con certificado .p12, integración con web services del SRI, generación de clave de acceso de 49 dígitos y generación de código QR para validación.
+
+- **Framework:** Spring Boot 3 + Spring Data JPA + XML Digital Signature (Apache XML Security / BouncyCastle)
+- **Base de datos:** PostgreSQL
+- **Integraciones externas:**
+  - **SRI (Servicio de Rentas Internas)** — Recepción y autorización de comprobantes electrónicos
+    - Pruebas: `https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline`
+    - Producción: `https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline`
+  - **HashiCorp Vault** — Almacenamiento seguro de certificados .p12 y contraseñas (producción)
+  - **Docker Secrets** — Almacenamiento de certificados (staging)
+  - **Proveedores de firma electrónica** — BCE, Security Data (SDS), ANF Ecuador, Ecuacert, GlobalSign, DigiCert
+
+**Flujo completo de facturación electrónica:**
+```
+1. orders-service crea pedido confirmado → evento order.confirmed en RabbitMQ
+      ↓
+2. billing-service consume evento order.confirmed
+      ↓
+3. Recupera datos del contribuyente (configuración del tenant)
+   ├── Datos del emisor: RUC, razón social, dirección, establecimiento, punto de emisión
+   ├── Certificado .p12 desde Vault/Docker Secrets
+   └── Configuración fiscal del tenant (ambiente: prueba/producción)
+      ↓
+4. Genera clave de acceso de 49 dígitos (algoritmo SRI)
+      ↓
+5. Genera XML del comprobante (factura, nota de crédito o retención)
+   └── Valida estructura contra XSD oficial del SRI
+      ↓
+6. Firma electrónica del XML con certificado .p12 (RSA-SHA256)
+      ↓
+7. Envía XML firmado al web service del SRI (RecepcionComprobantes)
+   ├── Si AUTORIZADO → almacena número de autorización + XML autorizado
+   ├── Si RECHAZADO/DEVUELTO → almacena errores para corrección
+   └── Reintentos automáticos con backoff (máx. 3 intentos)
+      ↓
+8. Genera PDF de factura con código QR de validación SRI
+      ↓
+9. Almacena en MinIO: invoices/{tenantId}/{year}/{month}/{claveAcceso}.xml/pdf
+      ↓
+10. Notifica al tenant: factura autorizada (push FCM + email + WhatsApp)
+```
+
+- **Responsabilidades:**
+  - Generación de claves de acceso de 49 dígitos según algoritmo del SRI
+  - Generación de XML de comprobantes: facturas (tipo 1), notas de crédito (tipo 4), comprobantes de retención (tipo 7)
+  - Firma electrónica de XML con certificados PKCS#12 (.p12/.pfx)
+  - Integración con web services del SRI (recepción y autorización)
+  - Gestión de certificados digitales (subida, validación de vigencia, rotación)
+  - Almacenamiento seguro de credenciales en HashiCorp Vault (producción) / Docker Secrets (staging)
+  - Generación de facturas PDF con QR de validación
+  - Gestión de secuenciales por establecimiento + punto de emisión
+  - Gestión de ambientes (pruebas / producción)
+  - Configuración de proveedores de firma electrónica
+  - Consumo de eventos `order.confirmed` desde RabbitMQ para auto-facturación
+  - Publicación de eventos `invoice.authorized`, `invoice.voided` en RabbitMQ
+
+- **Endpoints:**
+  - `POST /api/v1/invoices/generate` — generar factura electrónica con clave de acceso
+  - `POST /api/v1/invoices/{id}/sign` — firmar XML electrónicamente
+  - `POST /api/v1/invoices/{id}/send-to-sri` — enviar comprobante al SRI para autorización
+  - `GET /api/v1/invoices/{id}/authorized-xml` — obtener XML autorizado por el SRI
+  - `GET /api/v1/invoices/{id}/qr` — generar código QR para validación
+  - `POST /api/v1/invoices/{invoiceId}/credit-note` — generar nota de crédito electrónica
+  - `POST /api/v1/invoices/{invoiceId}/withholding` — generar comprobante de retención
+  - `GET/POST /api/v1/billing/config` — configuración fiscal del contribuyente (Epic 10)
+  - `POST /api/v1/billing/certificate/upload` — subir certificado .p12/.pfx
+  - `POST /api/v1/billing/rotate-certificate` — rotar certificado sin downtime
+  - `GET/POST /api/v1/billing/providers` — gestión de proveedores de firma
+  - `POST /api/v1/billing/environment/switch` — cambiar ambiente (pruebas ↔ producción)
+
+- **Puerto:** `8087`
+
+**Variables de entorno:**
+
+```
+BILLING_SRI_ENVIRONMENT=prueba|produccion
+BILLING_SRI_RECEPTION_URL=https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline
+BILLING_SRI_AUTHORIZATION_URL=https://celcer.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline
+VAULT_URL=http://autoflow-vault:8200          # HashiCorp Vault (producción)
+VAULT_TOKEN=<root-token>                       # Token de Vault
+BILLING_CERT_PATH=secret/data/billing/{tenant_id}/certificate
+BILLING_CERT_PASS_PATH=secret/data/billing/{tenant_id}/certificate_password
+BILLING_SIGNING_PROVIDER=BCE|SDS|ANF|ECUACERT|GLOBALSIGN|DIGICERT
+BILLING_QR_BASE_URL=https://verififact.sri.gob.ec/cgi-bin/cfaces/CeFacSWSPLE?cmp=
+```
+
+**Modelo de datos clave (PostgreSQL):**
+
+```sql
+-- Comprobantes electrónicos
+invoices (id, tenant_id, order_id, invoice_type, clave_acceso, secuencial,
+          establishment_code, emission_point, invoice_date, subtotal, iva,
+          ice, ir, total, status, sri_authorization_number,
+          sri_authorization_date, sri_environment, sri_status, created_at, updated_at)
+
+-- Detalle de ítems de factura
+invoice_items (id, invoice_id, product_code, description, quantity,
+               unit_price, subtotal, iva_rate, ice_rate)
+
+-- Notas de crédito
+credit_notes (id, tenant_id, invoice_id_original, clave_acceso_original,
+              clave_acceso_nota, secuencial, motivo, total_abonado, status)
+
+-- Comprobantes de retención
+withholding_receipts (id, tenant_id, invoice_id, clave_acceso,
+                      secuencial, periodo_fiscal, total_retenido, status)
+
+-- Configuración fiscal del contribuyente (Epic 10)
+tenant_billing_config (id, tenant_id, ruc, razon_social, nombre_comercial,
+                       direccion_matricial, establecimiento, punto_emision,
+                       tipo_contribuyente, ambiente_sri, signing_provider)
+
+-- Logs de interacción con SRI
+invoice_sri_logs (id, invoice_id, action, request_xml, response_xml,
+                  sri_status, sri_messages, attempt, created_at)
+```
+
 #### `n8n` — Automatización de Flujos
 
 - **Framework:** N8N (instancia Docker self-hosted)
@@ -501,6 +628,10 @@ FCM_PROJECT_ID=<firebase-project-id>
   - Plantillas de automatización pre-construidas
   - Recordatorios de citas programados (alternativa al scheduler interno)
 - **Comunicación:** Consume APIs de los otros servicios vía HTTP
+- **Webhooks entrantes:**
+  - `/webhook/n8n/prospects` — Recepción de prospectos del chatbot (integración con `crm-service` para crear/actualizar clientes)
+  - `/webhook/n8n/invoice-reminders` — Recordatorios de facturación pendiente
+  - `/webhook/n8n/appointment-reminders` — Recordatorios de citas (24h antes y 2h antes)
 - **Puerto:** `5678`
 
 ---
@@ -530,6 +661,10 @@ FCM_PROJECT_ID=<firebase-project-id>
 | `appointment.confirmed` | appointment-service | notifications-service, whatsapp-service |
 | `appointment.cancelled` | appointment-service | notifications-service, whatsapp-service, n8n |
 | `appointment.reminder` | appointment-service / n8n | notifications-service, whatsapp-service |
+| `order.confirmed` | orders-service | billing-service (auto-facturación) |
+| `invoice.authorized` | billing-service | notifications-service, whatsapp-service, crm-service |
+| `invoice.voided` | billing-service | notifications-service, whatsapp-service |
+| `prospect.received` | n8n (webhook chatbot) | crm-service (crear/actualizar cliente) |
 
 **Exchange:** Topic exchange `autoflow.events`
 
@@ -557,6 +692,7 @@ Cliente ──HTTPS──▶ API Gateway ──HTTP──▶ Microservicio
 | `clients`, `interactions`, `pipeline_stages`, `tags` | crm-service | Datos relacionales, joins complejos, queries por múltiples campos |
 | `orders`, `order_items`, `products`, `invoices` | orders-service | Transaccional, integridad referencial (ACID), facturación |
 | `appointments`, `appointment_services`, `business_schedules`, `tenant_integrations` | appointment-service | Transaccional, concurrencia crítica (doble reserva), ACID |
+| `invoices`, `invoice_items`, `credit_notes`, `withholding_receipts`, `tenant_billing_config`, `invoice_sri_logs` | billing-service | Transaccional, datos fiscales, integridad legal de comprobantes, auditoría SRI |
 | `report_snapshots` | reports-service | Datos agregados, time-series ligera |
 
 ### 3.2 MongoDB — Datos No Estructurados
@@ -593,6 +729,7 @@ graph TB
         GCAL["📅 Google Calendar API<br/>(verificación disponibilidad)"]
         BAPI["🔌 APIs de Negocios<br/>(sistemas de gestión propios)"]
         FCM_EXT["🔔 Firebase Cloud Messaging<br/>(push iOS + Android)"]
+        SRI_EXT["🏛️ SRI Ecuador<br/>(facturacion.sri.gob.ec)<br/>Recepción y Autorización"]
     end
 
     subgraph "Sistema AutoFlow"
@@ -604,6 +741,7 @@ graph TB
         APPT["📅 appointment-service"]
         NOTIF["🔔 notifications-service"]
         RPT["📊 reports-service"]
+        BILL["🧾 billing-service"]
         N8N_SVC["⚡ n8n"]
     end
 
@@ -628,6 +766,9 @@ graph TB
     AGW --> ORD
     AGW --> APPT
     AGW --> RPT
+    AGW --> BILL
+    BILL --> SRI_EXT
+    ORD --> BILL
     APPT --> GCAL
     APPT --> BAPI
     NOTIF --> FCM_EXT
@@ -663,7 +804,8 @@ graph TB
         WA_S["whatsapp-service<br/>Spring Boot<br/>:8084"]
         NOT_S["notifications-service<br/>Spring Boot<br/>:8085"]
         RPT_S["reports-service<br/>Spring Boot<br/>:8086"]
-        APPT_S["appointment-service<br/>Spring Boot<br/>:8087"]
+        APPT_S["appointment-service<br/>Spring Boot<br/>:8088"]
+        BILL_S["billing-service<br/>Spring Boot<br/>:8087"]
         N8N_S["n8n<br/>Workflow Automation<br/>:5678"]
     end
 
@@ -671,6 +813,7 @@ graph TB
         EVOL_API["Evolution API<br/>evolutionapi.egit.site"]
         FCM_SVC["Firebase Cloud<br/>Messaging (FCM)"]
         GCAL_SVC["Google Calendar<br/>API"]
+        SRI_WS["SRI Ecuador<br/>RecepcionComprobantes<br/>AutorizacionComprobantes"]
     end
 
     subgraph "Datos"
@@ -687,6 +830,7 @@ graph TB
     GW --> ORD_S
     GW --> APPT_S
     GW --> RPT_S
+    GW --> BILL_S
     AUTH_S --> PG_DB
     CRM_S --> PG_DB
     ORD_S --> PG_DB
@@ -701,6 +845,8 @@ graph TB
     NOT_S --> FCM_SVC
     RPT_S --> PG_DB
     RPT_S --> MDB_DB
+    BILL_S --> PG_DB
+    BILL_S --> SRI_WS
     GW --> R_DB
     N8N_S --> GW
     CRM_S --> RMQ_DB
@@ -797,7 +943,7 @@ graph TB
 
 ### 5.2 API Gateway como Auth Filter
 
-- El gateway intercepta **todas** las requests excepto `/auth/login`, `/auth/register`, `/webhook/evolution`
+- El gateway intercepta **todas** las requests excepto `/auth/login`, `/auth/register`, `/webhook/evolution`, `/webhook/n8n/*`
 - Valida el JWT antes de enrutar al microservicio correspondiente
 - Extrae claims (`userId`, `tenantId`, `roles`) y los pasa como headers:
   - `X-User-Id`
@@ -841,10 +987,10 @@ graph TB
 │  │api-gate- │ │auth-svc  │ │crm-svc   │ │orders-svc│ │whatsapp- │ │notific-  │      │
 │  │way :8080 │ │:8081     │ │:8082     │ │:8083     │ │svc :8084 │ │ations    │      │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │svc :8085 │      │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐                           └──────────┘      │
-│  │reports-  │ │appoint-  │ │  n8n     │                                              │
-│  │svc :8086 │ │ment :8087│ │  :5678   │                                              │
-│  └──────────┘ └──────────┘ └──────────┘                                              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                              │
+│  │reports-  │ │appoint-  │ │billing-  │ │  n8n     │                              │
+│  │svc :8086 │ │ment :8088│ │svc :8087 │ │  :5678   │                              │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘                              │
 │                                                                                       │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                  │
 │  │PostgreSQL│ │ MongoDB  │ │  Redis   │ │ RabbitMQ │ │  MinIO   │                  │
@@ -872,7 +1018,8 @@ graph TB
 | WhatsApp Service | `autoflow-whatsapp` | `8084` | `8084` | HTTP |
 | Notifications Service | `autoflow-notifications` | `8085` | `8085` | HTTP |
 | Reports Service | `autoflow-reports` | `8086` | `8086` | HTTP |
-| **Appointment Service** | **`autoflow-appointments`** | **`8087`** | **`8087`** | **HTTP** |
+| **Appointment Service** | **`autoflow-appointments`** | **`8088`** | **`8088`** | **HTTP** |
+| **Billing Service** | **`autoflow-billing`** | **`8087`** | **`8087`** | **HTTP** |
 | N8N | `autoflow-n8n` | `5678` | `5678` | HTTP |
 | PostgreSQL | `autoflow-postgres` | `5432` | `5432` | TCP |
 | MongoDB | `autoflow-mongo` | `27017` | `27017` | TCP |
@@ -900,6 +1047,14 @@ graph TB
 | `FCM_SERVICE_ACCOUNT_JSON` | notifications-service | Path o contenido del Service Account JSON de Firebase |
 | `FCM_PROJECT_ID` | notifications-service | ID del proyecto Firebase |
 | `GOOGLE_CALENDAR_SERVICE_ACCOUNT_JSON` | appointment-service | Service Account JSON para Google Calendar API |
+| `BILLING_SRI_ENVIRONMENT` | billing-service | Ambiente SRI: `prueba` o `produccion` |
+| `BILLING_SRI_RECEPTION_URL` | billing-service | URL del web service de recepción del SRI |
+| `BILLING_SRI_AUTHORIZATION_URL` | billing-service | URL del web service de autorización del SRI |
+| `VAULT_URL` | billing-service | URL de HashiCorp Vault (producción) |
+| `VAULT_TOKEN` | billing-service | Token de acceso a Vault |
+| `BILLING_CERT_PATH` | billing-service | Vault path para certificado .p12 |
+| `BILLING_CERT_PASS_PATH` | billing-service | Vault path para contraseña del certificado |
+| `BILLING_SIGNING_PROVIDER` | billing-service | Proveedor de firma: BCE, SDS, ANF, ECUACERT, GLOBALSIGN, DIGICERT |
 | `N8N_ENCRYPTION_KEY` | n8n | Clave de encriptación de N8N |
 | `MAIL_HOST` | notifications-service | Servidor SMTP |
 | `APP_CORS_ALLOWED_ORIGINS` | gateway | Orígenes CORS permitidos |
@@ -934,6 +1089,7 @@ jobs:
       reports: ${{ steps.filter.outputs.reports }}
       gateway: ${{ steps.filter.outputs.gateway }}
       appointments: ${{ steps.filter.outputs.appointments }}
+      billing: ${{ steps.filter.outputs.billing }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -948,13 +1104,14 @@ jobs:
             reports: ['services/reports-service/**']
             gateway: ['services/api-gateway/**']
             appointments: ['services/appointment-service/**']
+            billing: ['services/billing-service/**']
 
   build-and-test:
     needs: detect-changes
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [auth-service, crm-service, orders-service, whatsapp-service, notifications-service, reports-service, api-gateway, appointment-service]
+        service: [auth-service, crm-service, orders-service, whatsapp-service, notifications-service, reports-service, api-gateway, appointment-service, billing-service]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -969,6 +1126,10 @@ jobs:
         if: github.ref == 'refs/heads/main'
         working-directory: services/${{ matrix.service }}
         run: docker build -t autoflow/${{ matrix.service }}:${{ github.sha }} .
+      - name: Build Billing Docker Image
+        if: github.ref == 'refs/heads/main' && needs.detect-changes.outputs.billing == 'true'
+        working-directory: services/billing-service
+        run: docker build -t autoflow/billing-service:${{ github.sha }} .
 ```
 
 ### 7.2 Estructura de Docker Images
@@ -1046,6 +1207,30 @@ autoflow/
 │       │       ├── integration/    ← adaptadores Google Cal + APIs propias
 │       │       └── config/
 │       └── Dockerfile
+├── billing-service/               ← NUEVO (v2.3) — Facturación Electrónica SRI
+│   ├── build.gradle.kts
+│   ├── src/
+│   │   └── main/kotlin/com/autoflow/billing/
+│   │       ├── controller/
+│   │       ├── service/
+│   │       │   ├── InvoiceService.java
+│   │       │   ├── XmlGenerationService.java
+│   │       │   ├── XmlSignService.java
+│   │       │   ├── SriIntegrationService.java
+│   │       │   ├── ClaveAccesoService.java
+│   │       │   ├── QrGenerationService.java
+│   │       │   ├── PdfGenerationService.java
+│   │       │   ├── CertificateService.java
+│   │       │   └── BillingConfigService.java
+│   │       ├── repository/
+│   │       ├── model/
+│   │       ├── dto/
+│   │       ├── integration/
+│   │       │   ├── sri/            ← adaptadores web service SRI
+│   │       │   ├── vault/          ← HashiCorp Vault client
+│   │       │   └── signing/        ← proveedores de firma (BCE, SDS, ANF, etc.)
+│   │       └── config/
+│   └── Dockerfile
 ├── n8n/
 │   └── workflows/          # Workflows exportados de N8N
 ├── .github/
@@ -1143,6 +1328,7 @@ spring:
 | notifications-service | `autoflow-notifications` |
 | reports-service | `autoflow-reports` |
 | appointment-service | `autoflow-appointments` |
+| billing-service | `autoflow-billing` |
 | n8n | `autoflow-n8n` |
 | PostgreSQL | `autoflow-postgres` |
 | MongoDB | `autoflow-mongo` |
@@ -1259,6 +1445,8 @@ Los Component Diagrams (Nivel 3) de los siguientes servicios quedan como deuda t
 | ✅ WhatsApp vía Evolution API | Completo | Migrado de Meta directo a Evolution API self-hosted (v2.2) |
 | ✅ Push notifications FCM | Completo | Firebase Cloud Messaging especificado (v2.2) |
 | ✅ Módulo de citas | Completo | appointment-service documentado con flujos y reglas (v2.2) |
+| ✅ Facturación Electrónica SRI | Completo | billing-service documentado con flujos, endpoints y modelo de datos (v2.3) |
+| ✅ Configuración Facturación | Completo | Epic 10 cubierto dentro de billing-service (v2.3) |
 | ✅ Comunicación sincrónica | Completo | REST via API Gateway |
 | ✅ Comunicación asíncrona | Completo | RabbitMQ con eventos documentados (incluye citas) |
 | ✅ Diseño de datos | Completo | PostgreSQL + MongoDB + Redis |
@@ -1286,3 +1474,4 @@ Los Component Diagrams (Nivel 3) de los siguientes servicios quedan como deuda t
 *Versión 2.0 — Reescrito con arquitectura de microservicios por Archy.*
 *Versión 2.1 — Audit de completitud y resolución de 6 gaps por Archy (2026-03-17).*
 *Versión 2.2 — 4 cambios por revisión de Eduardo: Evolution API, FCM, specs iniciales, appointment-service (2026-03-17).*
+*Versión 2.3 — Nuevo microservicio billing-service (8087) para Facturación Electrónica SRI — Epics 9 y 10. Appointment-service reasignado a 8088. Eventos RabbitMQ para facturación. N8N webhook para prospectos del chatbot (2026-03-17).*
