@@ -1,5 +1,5 @@
 # Historias de Usuario — AutoFlow
-**Versión:** 1.1  
+**Versión:** 1.2  
 **Fecha:** 2026-03-17  
 **Autor:** Maya (Project Manager, EGIT Consultoría)  
 **Referencia:** ADR-001 v2.0 + ADR-002 v2.2  
@@ -1290,6 +1290,141 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 
 ---
 
+## Epic 10: Configuración de Facturación Electrónica
+
+> **Servicio:** `billing-config-service` (configuración del módulo de facturación electrónica)  
+> **Descripción:** Configuración completa del contribuyente ante el SRI: datos del emisor, certificado de firma electrónica (.p12/.pfx), almacenamiento seguro de credenciales en HashiCorp Vault, proveedor de firma, generación de clave de acceso y gestión de ambientes (pruebas/producción).
+
+---
+
+### HU-060: Configurar datos del contribuyente
+**Epic:** Epic 10 — Configuración de Facturación Electrónica
+
+**Como** administrador de la empresa,
+**quiero** ingresar y guardar los datos del contribuyente (RUC, razón social, nombre comercial, dirección, código de establecimiento, punto de emisión, tipo de contribuyente y ambiente SRI),
+**para** que el sistema genere comprobantes electrónicos con la información fiscal correcta del emisor.
+
+**Criterios de aceptación:**
+
+1. El formulario de configuración fiscal incluye: RUC (13 dígitos), razón social (máx. 160 caracteres), nombre comercial, dirección matricial, código de establecimiento (3 dígitos), punto de emisión (3 dígitos), tipo de contribuyente (自然/jurídico/Contribuyente Especial) y ambiente SRI (prueba/producción).
+2. El RUC se valida con el algoritmo de dígito verificador del SRI; muestra error si no cumple el formato.
+3. La dirección y datos del receptor se codifican automáticamente en el XML del comprobante según el esquema del SRI.
+4. Se puede actualizar cualquier dato fiscal y el sistema registra un log de auditoría con el usuario, fecha y valores anteriores/nuevos.
+5. Los datos se persisten por tenant (multi-tenancy); cada empresa tiene su propia configuración fiscal.
+
+**Prioridad:** Alta  
+**Story Points:** 5
+
+---
+
+### HU-061: Subir y configurar certificado de firma electrónica (.p12/.pfx)
+**Epic:** Epic 10 — Configuración de Facturación Electrónica
+
+**Como** administrador de la empresa,
+**quiero** subir mi archivo de certificado digital de firma electrónica (.p12 o .pfx) y registrar su contraseña,
+**para** que el sistema pueda firmar digitalmente los comprobantes electrónicos antes de enviarlos al SRI.
+
+**Criterios de aceptación:**
+
+1. La interfaz permite subir archivos con extensión `.p12` o `.pfx` (máx. 5 MB) a través de un upload seguro (HTTPS).
+2. El sistema valida que el archivo sea un keystore PKCS#12 válido: verifica la estructura interna y que contiene al menos un certificado y una clave privada.
+3. Se solicita la contraseña del certificado en un campo enmascarado; la contraseña nunca se muestra en texto plano ni se almacena sin cifrar.
+4. El sistema extrae y muestra la información del certificado: nombre del titular, RUC del titular, fecha de emisión, fecha de expiración y emisor del certificado.
+5. Se muestra una alerta 60 días antes de la expiración del certificado y notifica al administrador vía email/WhatsApp.
+6. Solo usuarios con rol **Admin** pueden subir o reemplazar certificados.
+
+**Prioridad:** Alta  
+**Story Points:** 5
+
+---
+
+### HU-062: Almacenar certificado y contraseña de forma segura en HashiCorp Vault
+**Epic:** Epic 10 — Configuración de Facturación Electrónica
+
+**Como** arquitecto de seguridad,
+**quiero** que el certificado .p12 y su contraseña se almacenen exclusivamente en HashiCorp Vault (producción), Docker Secrets (staging) o `.env` cifrado local (desarrollo),
+**para** garantizar que las credenciales de firma electrónica nunca se expongan en código fuente, base de datos o archivos de configuración no cifrados.
+
+**Criterios de aceptación:**
+
+1. En **producción**: el certificado y la contraseña se guardan como secrets en HashiCorp Vault con path `secret/data/billing/{tenant_id}/certificate` y `secret/data/billing/{tenant_id}/certificate_password`, con políticas de acceso restringidas por tenant.
+2. En **staging**: se usan Docker Secrets con nombres `billing_cert_{tenant_id}` y `billing_cert_pass_{tenant_id}`, montados como volúmenes read-only en el contenedor.
+3. En **desarrollo**: se permite `.env` local con cifrado AES-256; el archivo `.env` está en `.gitignore` y nunca se commitea.
+4. El servicio lee las credenciales al iniciar y cachea en memoria con TTL de 1 hora; no se loguean, no aparecen en respuestas API, no se almacenan en la base de datos.
+5. Existe un endpoint `POST /api/v1/billing/rotate-certificate` que permite rotar el certificado sin downtime (upload nuevo → validar → actualizar Vault → invalidar cache → log de auditoría).
+6. Se cumple el ADR-002 v2.2 de gestión de secretos por fase.
+
+**Prioridad:** Alta  
+**Story Points:** 8
+
+---
+
+### HU-063: Seleccionar y configurar proveedor de firma electrónica
+**Epic:** Epic 10 — Configuración de Facturación Electrónica
+
+**Como** administrador de la empresa,
+**quiero** seleccionar y configurar mi proveedor de firma electrónica (Banco Central del Ecuador, Security Data / SDS, ANF Ecuador, Ecuacert, GlobalSign o DigiCert),
+**para** que el sistema utilice el endpoint y protocolo correctos para firmar los comprobantes electrónicos.
+
+**Criterios de aceptación:**
+
+1. El panel de configuración presenta una lista desplegable con los proveedores soportados: BCE, Security Data (SDS), ANF Ecuador, Ecuacert, GlobalSign y DigiCert.
+2. Cada proveedor tiene configuraciones específicas predefinidas: URL de servicio de firma, protocolo (SOAP/REST), formato de request y timeout de conexión.
+3. El sistema permite probar la conexión con el proveedor de firma mediante un botón "Validar conexión" que ejecuta una firma de prueba y muestra el resultado.
+4. El proveedor seleccionado se almacena en la configuración del tenant y se usa automáticamente al generar comprobantes.
+5. Se puede cambiar el proveedor en cualquier momento; el sistema conserva un historial de cambios con timestamp y usuario responsable.
+
+**Prioridad:** Alta  
+**Story Points:** 3
+
+---
+
+### HU-064: Generar clave de acceso de 49 dígitos según normativa SRI
+**Epic:** Epic 10 — Configuración de Facturación Electrónica
+
+**Como** sistema,
+**quiero** generar automáticamente la clave de acceso de 49 dígitos para cada comprobante electrónico según el algoritmo definido por el SRI,
+**para** que cada factura, nota de crédito, retención y guía de remisión cumpla con el estándar de identificación único del comprobante.
+
+**Criterios de aceptación:**
+
+1. La clave de acceso se genera con el formato: `Fecha (8) + RUC emisor (13) + Tipo de comprobante (2) + Serie (4) + Número secuencial (9) + Código numérico (8) + Tipo de emisión (1) + Dígito verificador (1) = 49 dígitos`.
+2. El código numérico de 8 dígitos se genera aleatoriamente usando `SecureRandom` (no pseudoaleatorio simple).
+3. El dígito verificador se calcula con el algoritmo módulo 11 definido por el SRI.
+4. Cada clave de acceso es única; el sistema verifica unicidad antes de asignar (manejo de colisiones con reintento automático).
+5. La clave de acceso se almacena con el comprobante y se incluye en el XML, el PDF y el código QR del comprobante.
+6. El generador es un módulo standalone con cobertura de tests unitarios que validan el algoritmo contra claves de acceso de comprobantes de prueba del SRI.
+
+**Prioridad:** Alta  
+**Story Points:** 5
+
+---
+
+### HU-065: Configurar ambiente SRI (pruebas → producción) con credenciales correspondientes
+**Epic:** Epic 10 — Configuración de Facturación Electrónica
+
+**Como** administrador de la empresa,
+**quiero** gestionar la transición del ambiente de pruebas al ambiente de producción del SRI con sus credenciales y configuraciones correspondientes,
+**para** que la empresa pueda validar su integración en sandbox antes de emitir facturas electrónicas con validez legal.
+
+**Criterios de aceptación:**
+
+1. El sistema soporta dos ambientes: **Pruebas** (`https://celcer.sri.gob.ec/`) y **Producción** (`https://cel.sri.gob.ec/`) con URLs y certificados separados.
+2. El ambiente se configura a nivel de tenant; el Admin puede cambiar de `PRUEBA` a `PRODUCCIÓN` pero la reversa requiere confirmación adicional y motivo documentada.
+3. Credenciales de cada ambiente (usuario SRI, contraseña, certificado de firma) se almacenan por separado en Vault con paths distintos.
+4. Al cambiar a producción, el sistema ejecuta una checklist de validación: certificado vigente (>30 días), RUC activo, punto de emisión registrado, conexión con receptor SRI exitosa.
+5. Existe un indicador visual claro del ambiente actual (badge "PRUEBAS" en amarillo / "PRODUCCIÓN" en verde) visible en todas las pantallas de facturación.
+6. Los comprobantes generados en ambiente de pruebas incluyen un sello "SOLO FINES DE PRUEBA — SIN VALOR TRIBUTARIO" en el PDF.
+
+**Prioridad:** Alta  
+**Story Points:** 5
+
+---
+
+**Subtotal Epic 10: 6 HUs | 31 Story Points**
+
+---
+
 ## Resumen General
 
 ### Totales por Epic
@@ -1305,7 +1440,8 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 | Epic 7 | Reportes & Dashboard | 5 | 34 |
 | Epic 8 | Configuración Multi-tenant | 7 | 37 |
 | Epic 9 | Facturación Electrónica (SRI Ecuador) | 7 | 50 |
-| **TOTAL** | | **59** | **343** |
+| Epic 10 | Configuración de Facturación Electrónica | 6 | 31 |
+| **TOTAL** | | **65** | **374** |
 
 ---
 
@@ -1313,10 +1449,10 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 
 | Prioridad | # HUs | Story Points |
 |-----------|:-----:|:------------:|
-| 🔴 Alta | 42 | 253 |
+| 🔴 Alta | 48 | 284 |
 | 🟡 Media | 15 | 78 |
 | 🟢 Baja | 2 | 12 |
-| **TOTAL** | **59** | **343** |
+| **TOTAL** | **65** | **374** |
 
 ---
 
@@ -1325,9 +1461,9 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 | Story Points | # HUs |
 |:------------:|:-----:|
 | 13 | 0 |
-| 8 | 19 |
-| 5 | 19 |
-| 3 | 13 |
+| 8 | 20 |
+| 5 | 23 |
+| 3 | 14 |
 | 2 | 0 |
 | 1 | 0 |
 | **Promedio** | **5.8 SP/HU** |
@@ -1346,12 +1482,14 @@ Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando u
 | Sprint 6 — Citas completo | HU-036 a HU-040 + HU-049, HU-051 | ~42 |
 | Sprint 7 — Reportes + Config | HU-041 a HU-045 + HU-052 | ~39 |
 | Sprint 8 — Facturación Electrónica (SRI) | HU-053 a HU-059 (Epic 9 completo) | ~50 |
+| Sprint 9 — Configuración Facturación | HU-060 a HU-065 (Epic 10 completo) | ~31 |
 
-**Estimación total: ~8 sprints (~16 semanas) para MVP completo**
+**Estimación total: ~9 sprints (~18 semanas) para MVP completo**
 
 ---
 
 *Documento generado por Maya (Project Manager, AutoFlow — EGIT Consultoría)*  
 *Basado en ADR-001 v2.0 y ADR-002 v2.2*  
 *Fecha: 2026-03-17*  
+*Actualizado: 2026-03-17 — Epic 10 (Configuración de Facturación Electrónica) agregado*  
 *Para revisión y aprobación de: Eduardo Guerra (CEO, EGIT)*
