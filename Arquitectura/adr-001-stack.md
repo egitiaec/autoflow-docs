@@ -39,6 +39,7 @@ Se adopta el siguiente stack tecnológico definitivo para AutoFlow:
 | **Backend** | Spring Boot 3 | 3.4.x (Java 21 LTS) |
 | **Android** | Kotlin + Jetpack Compose | Kotlin 2.1.x / Compose BOM 2025.x |
 | **iOS** | SwiftUI | Swift 6.x / iOS 17+ target |
+| **Web Dashboard** | Angular + PrimeNG + Bootstrap | Angular 17+ / PrimeNG 17+ / Bootstrap 5 |
 | **Automatización** | N8N (self-hosted) | 1.80+ |
 | **BD Relacional** | PostgreSQL | 17.x |
 | **BD NoSQL** | MongoDB | 8.x |
