@@ -1,5 +1,5 @@
 # Historias de Usuario — AutoFlow
-**Versión:** 1.0  
+**Versión:** 1.1  
 **Fecha:** 2026-03-17  
 **Autor:** Maya (Project Manager, EGIT Consultoría)  
 **Referencia:** ADR-001 v2.0 + ADR-002 v2.2  
@@ -1131,6 +1131,165 @@ Como **Sistema/Admin de EGIT**, quiero configurar límites de uso por tenant, pa
 
 ---
 
+## Epic 9: Facturación Electrónica (SRI Ecuador)
+
+> **Servicio:** `invoicing-service` (Spring Boot + PostgreSQL + XML Digital Signature)  
+> **Integración:** Servicios web del SRI (facturacion.sri.gob.ec) — Ambiente de Producción / Pruebas  
+> **Descripción:** Generación, firma electrónica, envío y almacenamiento de comprobantes electrónicos conforme a la normativa del SRI de Ecuador. Incluye facturas, notas de crédito, notas de débito, comprobantes de retención, guías de remisión y liquidaciones de compras.
+
+---
+
+### HU-053: Generar factura electrónica con clave de acceso
+**Epic:** Epic 9 — Facturación Electrónica (SRI Ecuador)  
+**Título:** Generación de factura electrónica con clave de acceso de 49 dígitos
+
+**Historia:**  
+Como **facturador**, quiero generar una factura electrónica con su clave de acceso correspondiente, para cumplir con la normativa del SRI y entregar un comprobante válido al cliente.
+
+**Criterios de Aceptación:**
+1. El sistema genera la clave de acceso de 49 dígitos según la fórmula del SRI: código del tipo de comprobante (1) + número de serie del establecimiento (9) + punto de emisión (3) + secuencial (9) + código numérico (8) + fecha de emisión (8) + tipo de contribuyente (1) + RUC del emisor (13).
+2. La clave de acceso es única por comprobante; el sistema valida duplicados antes de generar.
+3. La factura incluye todos los campos obligatorios del SRI: datos del emisor (nombre, RUC, dirección, establecimiento, punto de emisión), datos del receptor (nombre, RUC/cédula, dirección), detalle de productos/servicios con precios, subtotal, IVA (12% o 15%), ICE (si aplica), IR (si aplica) y total.
+4. El sistema calcula automáticamente los impuestos según la tarifa IVA vigente configurada por el tenant.
+5. El secuencial de la factura es consecutivo y único por establecimiento + punto de emisión del tenant.
+6. La factura se genera en estado `BORRADOR` antes de ser enviada al SRI.
+7. El endpoint `POST /api/v1/invoices/generate` retorna la factura con clave de acceso y XML base.
+
+**Prioridad:** Alta  
+**Story Points:** 8
+
+---
+
+### HU-054: Enviar comprobante al SRI para autorización
+**Epic:** Epic 9 — Facturación Electrónica (SRI Ecuador)  
+**Título:** Envío de comprobante electrónico al Servicio de Rentas Internas
+
+**Historia:**  
+Como **facturador**, quiero enviar el comprobante electrónico al SRI para obtener su autorización oficial, para que la factura sea legalmente válida ante el fisco ecuatoriano.
+
+**Criterios de Aceptación:**
+1. El sistema envía el comprobante XML firmado electrónicamente al web service del SRI (`recepcioncomprobantes.sri.gob.ec`).
+2. El endpoint del SRI se configura por ambiente: `https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline` (pruebas) y producción según corresponda.
+3. El sistema espera la respuesta del SRI que incluye: estado (`AUTORIZADO`, `RECHAZADO`, `DEVUELTO`), número de autorización (si fue autorizado) y mensajes de error (si fue rechazado o devuelto).
+4. Si el SRI retorna `RECHAZADO` o `DEVUELTO`, el sistema almacena los mensajes de error del SRI para que el usuario pueda corregir la factura y reenviar.
+5. El sistema maneja reintentos automáticos con backoff exponencial (máximo 3 intentos) ante timeouts o errores de red del SRI.
+6. Se registra timestamp de cada envío y respuesta en la tabla `invoice_sri_logs` para auditoría.
+7. El endpoint `POST /api/v1/invoices/{id}/send-to-sri` ejecuta el envío y retorna el estado de la respuesta del SRI.
+
+**Prioridad:** Alta  
+**Story Points:** 8
+
+---
+
+### HU-055: Recibir y almacenar factura autorizada con número de autorización
+**Epic:** Epic 9 — Facturación Electrónica (SRI Ecuador)  
+**Título:** Almacenamiento del comprobante autorizado por el SRI
+
+**Historia:**  
+Como **sistema**, quiero recibir y almacenar la factura autorizada por el SRI con su número de autorización y ambiente, para mantener un registro legal de todos los comprobantes emitidos.
+
+**Criterios de Aceptación:**
+1. Al recibir respuesta `AUTORIZADO` del SRI, el sistema almacena: número de autorización, fecha/hora de autorización, ambiente (`1`=Pruebas, `2`=Producción), estado (`AUTORIZADO`) y el XML autorizado completo.
+2. El comprobante autorizado se almacena en la tabla `authorized_invoices` con referencia al `invoice_id` del sistema.
+3. El XML autorizado se guarda en MinIO bajo la ruta `invoices/{tenantId}/{year}/{month}/{claveAcceso}.xml`.
+4. El estado de la factura en el sistema cambia de `ENVIADA` a `AUTORIZADA`.
+5. La factura autorizada es inmutable: no puede ser editada ni eliminada después de autorizada.
+6. El endpoint `GET /api/v1/invoices/{id}/authorized-xml` retorna el XML autorizado por el SRI.
+7. El sistema notifica al tenant (notificación push y email) cuando la factura es autorizada.
+
+**Prioridad:** Alta  
+**Story Points:** 5
+
+---
+
+### HU-056: Generar XML firmado electrónicamente
+**Epic:** Epic 9 — Facturación Electrónica (SRI Ecuador)  
+**Título:** Firma digital del comprobante electrónico con certificado del emisor
+
+**Historia:**  
+Como **sistema**, quiero generar el XML del comprobante con firma electrónica del emisor, para cumplir con el requisito de autenticidad e integridad exigido por el SRI.
+
+**Criterios de Aceptación:**
+1. El sistema firma el XML del comprobante usando el certificado digital del emisor (PKCS#12, formato `.p12` o `.pfx`).
+2. El certificado digital se almacena cifrado en el almacén de secrets del tenant; el Admin lo sube desde el panel de configuración.
+3. La firma electrónica incluye: sello digital del emisor, fecha/hora de firma y algoritmo de firma (RSA-SHA256).
+4. El XML firmado cumple con el esquema XSD oficial del SRI para el tipo de comprobante correspondiente.
+5. El sistema valida la estructura del XML contra el XSD del SRI antes de firmar; rechaza comprobantes con errores de estructura.
+6. El certificado digital tiene vigencia verificada; si está expirado, el sistema rechaza la firma con mensaje claro al usuario.
+7. El endpoint `POST /api/v1/invoices/{id}/sign` genera el XML firmado y lo retorna.
+
+**Prioridad:** Alta  
+**Story Points:** 8
+
+---
+
+### HU-057: Generar nota de crédito electrónica
+**Epic:** Epic 9 — Facturación Electrónica (SRI Ecuador)  
+**Título:** Emisión de nota de crédito para anular o corregir una factura autorizada
+
+**Historia:**  
+Como **facturador**, quiero generar una nota de crédito electrónica vinculada a una factura autorizada, para anular total o parcialmente una factura cuando el cliente se lo solicita o hay un error.
+
+**Criterios de Aceptación:**
+1. La nota de crédito se genera con su propia clave de acceso según fórmula del SRI (tipo de comprobante = 4).
+2. La nota de crédito vincula obligatoriamente la factura original (clave de acceso y número de autorización de la factura que corrige/anula).
+3. La nota de crédito incluye: datos del emisor y receptor, motivo de la nota (ej: "Devolución", "Descuento", "Error en facturación"), detalle de los valores que se abonan y total de la nota.
+4. La nota de crédito se envía al SRI para autorización siguiendo el mismo flujo que la factura (HU-054).
+5. Si la nota es por anulación total, el sistema marca la factura original como `ANULADA` y genera un evento `invoice.voided` en RabbitMQ.
+6. El secuencial de notas de crédito es independiente del de facturas, pero sigue la misma numeración consecutiva por establecimiento + punto de emisión.
+7. El endpoint `POST /api/v1/invoices/{invoiceId}/credit-note` genera, firma y envía la nota de crédito al SRI en un solo flujo.
+
+**Prioridad:** Alta  
+**Story Points:** 8
+
+---
+
+### HU-058: Generar comprobante de retención electrónico
+**Epic:** Epic 9 — Facturación Electrónica (SRI Ecuador)  
+**Título:** Emisión de comprobante de retención en la fuente e IVA electrónico
+
+**Historia:**  
+Como **facturador**, quiero generar comprobantes de retención electrónicos, para cumplir con la obligación de retener impuestos al proveedor según la normativa del SRI.
+
+**Criterios de Aceptación:**
+1. El comprobante de retención se genera con su propia clave de acceso (tipo de comprobante = 7).
+2. El comprobante vincula la factura retenida (clave de acceso) e incluye: período fiscal, valores retenidos, porcentaje de retención por cada impuesto (IR, IVA) y base imponible.
+3. Los porcentajes de retención son configurables por el tenant según su tipo de contribuyente y actividad económica.
+4. El comprobante incluye: datos del sujeto retenido (proveedor), datos del agente de retención (tenant), detalle de cada retención aplicada y total retenido.
+5. El comprobante se firma electrónicamente y se envía al SRI para autorización.
+6. El sistema calcula automáticamente los valores de retención según los porcentajes configurados y la base imponible de la factura.
+7. El endpoint `POST /api/v1/invoices/{invoiceId}/withholding` genera el comprobante de retención para una factura dada.
+
+**Prioridad:** Alta  
+**Story Points:** 8
+
+---
+
+### HU-059: Cliente valida factura con código QR en web del SRI
+**Epic:** Epic 9 — Facturación Electrónica (SRI Ecuador)  
+**Título:** Generación de código QR para validación del comprobante por el cliente
+
+**Historia:**  
+Como **cliente**, quiero poder validar mi factura en la web del SRI escaneando un código QR, para verificar que el comprobante es auténtico y esté autorizado por el SRI.
+
+**Criterios de Aceptación:**
+1. El sistema genera un código QR con la URL de validación del SRI siguiendo la estructura: `https://verififact.sri.gob.ec/cgi-bin/cfaces/CeFacSWSPLE?cmp=` seguido de la clave de acceso del comprobante.
+2. El código QR se incorpora en el PDF de la factura autorizada, en la esquina inferior derecha con tamaño mínimo de 3cm x 3cm.
+3. El QR incluye la clave de acceso del comprobante; al escanearlo, el cliente es redirigido a la página de verificación del SRI con los datos del comprobante.
+4. La página del SRI muestra: datos del emisor, datos del receptor, valores del comprobante, estado (`AUTORIZADO`), fecha de autorización y número de autorización.
+5. El QR se genera después de recibir la autorización del SRI; no aparece en facturas en estado `BORRADOR`.
+6. El sistema también genera un link URL directo (para enviar por WhatsApp/email) que abre la validación del SRI con un clic.
+7. El endpoint `GET /api/v1/invoices/{id}/qr` retorna la imagen del código QR en formato PNG.
+
+**Prioridad:** Alta  
+**Story Points:** 5
+
+---
+
+**Subtotal Epic 9: 7 HUs | 50 Story Points**
+
+---
+
 ## Resumen General
 
 ### Totales por Epic
@@ -1145,7 +1304,8 @@ Como **Sistema/Admin de EGIT**, quiero configurar límites de uso por tenant, pa
 | Epic 6 | Sistema de Citas (Google Calendar) | 8 | 47 |
 | Epic 7 | Reportes & Dashboard | 5 | 34 |
 | Epic 8 | Configuración Multi-tenant | 7 | 37 |
-| **TOTAL** | | **52** | **293** |
+| Epic 9 | Facturación Electrónica (SRI Ecuador) | 7 | 50 |
+| **TOTAL** | | **59** | **343** |
 
 ---
 
@@ -1153,10 +1313,10 @@ Como **Sistema/Admin de EGIT**, quiero configurar límites de uso por tenant, pa
 
 | Prioridad | # HUs | Story Points |
 |-----------|:-----:|:------------:|
-| 🔴 Alta | 35 | 203 |
+| 🔴 Alta | 42 | 253 |
 | 🟡 Media | 15 | 78 |
 | 🟢 Baja | 2 | 12 |
-| **TOTAL** | **52** | **293** |
+| **TOTAL** | **59** | **343** |
 
 ---
 
@@ -1165,12 +1325,12 @@ Como **Sistema/Admin de EGIT**, quiero configurar límites de uso por tenant, pa
 | Story Points | # HUs |
 |:------------:|:-----:|
 | 13 | 0 |
-| 8 | 14 |
-| 5 | 17 |
+| 8 | 19 |
+| 5 | 19 |
 | 3 | 13 |
 | 2 | 0 |
 | 1 | 0 |
-| **Promedio** | **5.6 SP/HU** |
+| **Promedio** | **5.8 SP/HU** |
 
 ---
 
@@ -1185,8 +1345,9 @@ Como **Sistema/Admin de EGIT**, quiero configurar límites de uso por tenant, pa
 | Sprint 5 — Notificaciones + Citas base | HU-028 a HU-032 + HU-033, HU-034, HU-035 | ~43 |
 | Sprint 6 — Citas completo | HU-036 a HU-040 + HU-049, HU-051 | ~42 |
 | Sprint 7 — Reportes + Config | HU-041 a HU-045 + HU-052 | ~39 |
+| Sprint 8 — Facturación Electrónica (SRI) | HU-053 a HU-059 (Epic 9 completo) | ~50 |
 
-**Estimación total: ~7 sprints (~14 semanas) para MVP completo**
+**Estimación total: ~8 sprints (~16 semanas) para MVP completo**
 
 ---
 
