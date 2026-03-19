@@ -6,83 +6,99 @@
 
 ## Composición del Equipo
 
-### Fase 1 (Sprints 1-4) — Equipo Core
-
 | Rol | Cantidad | Focus |
 |-----|----------|-------|
-| Backend Java Senior | 1 | Arquitectura, API Gateway, Auth, servicios complejos |
-| Backend Java Mid | 1 | Microservicios CRUD, integraciones, testing |
-| Frontend React | 1 | Dashboard, web app, componentes reutilizables |
-| Full-stack / N8N | 1 | Workflows N8N, integraciones, scripts, devops ligero |
+| Backend Java Senior | 1 | Arquitectura, patrones de diseño, code quality |
+| Backend Java Mid | 1 | Implementación de servicios, testing |
+| Frontend Angular | 1 | UI/UX web, componentes, estado de la app |
+| Mobile Developer | 1 | Aplicaciones móviles nativas Android e iOS |
+| Full-stack / N8N | 1 | Workflows de automatización, integraciones, infraestructura ligera |
+| DBA | 1 | Integridad, rendimiento y disponibilidad de los datos |
 
-**Total: 4 devs + 1 Scrum Master + 1 Product Owner**
-
-### Fase 2 (Post-Sprint 4) — Expansión
-
-| Rol | Cantidad | Focus |
-|-----|----------|-------|
-| Mobile Developer | 1 | App React Native / Flutter |
+**Total: 6 devs + 1 Scrum Master + 1 Product Owner**
 
 ---
 
 ## Responsabilidades por Rol
 
 ### 🔧 Backend Java Senior (BE1)
-**Dueño de:** Arquitectura técnica, patrones de diseño, code quality
-
+Dueño de: Arquitectura técnica, patrones de diseño, code quality
+Stack principal: Spring Boot, PostgreSQL, Redis, MongoDB
 Responsabilidades:
-- Definir arquitectura de microservicios y contratos de API
-- Diseñar esquemas de base de datos y migraciones
-- Implementar módulos complejos (auth, facturación, integración SEB)
+- Definir arquitectura de microservicios y contratos de API (OpenAPI/Swagger)
+- Diseñar esquemas relacionales (PostgreSQL) y de documentos (MongoDB), incluyendo estrategia de caché con Redis
+- Implementar módulos complejos (auth, facturación, integración con servicios externos)
 - Code review de todo el código backend
-- Configurar CI/CD pipeline y ambiente de staging
+- Configurar CI/CD pipeline y ambientes de staging/producción
 - Documentar decisiones técnicas (ADR - Architecture Decision Records)
+- Definir estándares de seguridad: JWT, OAuth2, manejo de secretos
 - Mentorear al Backend Java Mid
 
 ### 🔧 Backend Java Mid (BE2)
-**Dueño de:** Implementación de servicios, testing
-
+Dueño de: Implementación de servicios, testing
+Stack principal: Spring Boot, PostgreSQL, MongoDB
 Responsabilidades:
-- Implementar microservicios según especificaciones
-- Escribir tests unitarios y de integración
-- Consumir APIs externas (SEB, pasarelas de pago, etc.)
+- Implementar microservicios según especificaciones y contratos definidos por BE1
+- Escribir tests unitarios y de integración (JUnit, Mockito)
+- Consumir APIs externas (pasarelas de pago, servicios de terceros, etc.)
 - Actualizar documentación técnica de sus módulos
 - Participar activamente en code reviews (dar y recibir)
 - Mantener coverage ≥ 80% en sus servicios
+- Implementar manejo de errores, logging estructurado y trazabilidad
 
-### 🎨 Frontend React (FE)
-**Dueño de:** UI/UX web, componentes, estado de la app
-
+### 🎨 Frontend Angular (FE)
+Dueño de: UI/UX web, componentes, estado de la app
+Stack principal: Angular, TypeScript, Bootstrap, PrimeNG
 Responsabilidades:
-- Desarrollar dashboard y web app con React/TypeScript
-- Crear componente library reutilizable
-- Consumir APIs del backend (contract testing)
-- Implementar responsive design
-- Optimizar performance (lazy loading, code splitting)
-- Integrar autenticación JWT en el frontend
-- Validaciones de formularios y manejo de errores UX
+- Desarrollar dashboard y web app con Angular/TypeScript
+- Crear componente library reutilizable con PrimeNG y Bootstrap como base
+- Consumir APIs del backend (contract testing con Pact o similar)
+- Implementar responsive design con Bootstrap y customización PrimeNG
+- Optimizar performance (lazy loading, code splitting, OnPush strategy)
+- Integrar autenticación JWT en el frontend (guards, interceptors)
+- Validaciones de formularios reactivos y manejo de errores UX
+- Gestionar estado de la aplicación (NgRx o servicios + signals)
+
+### 📱 Mobile Developer (MOB)
+Dueño de: Aplicaciones móviles nativas Android e iOS
+Stack principal: Kotlin / Jetpack Compose (Android), Swift / SwiftUI (iOS)
+Responsabilidades:
+- Desarrollar la app Android con Kotlin y Jetpack Compose
+- Desarrollar la app iOS con Swift y SwiftUI
+- Consumir APIs REST del backend (Retrofit / URLSession)
+- Implementar autenticación JWT y manejo seguro de tokens en dispositivo
+- Gestionar navegación, estado local y persistencia (Room / CoreData)
+- Asegurar UX consistente entre plataformas respetando guidelines de cada OS (Material3 / HIG)
+- Publicar y mantener builds en Google Play y App Store
+- Coordinar con FE y BE para alineación de contratos de API
 
 ### ⚡ Full-stack / N8N (FS)
-**Dueño de:** Workflows de automatización, integraciones, infraestructura ligera
-
+Dueño de: Workflows de automatización, integraciones, infraestructura ligera
+Stack principal: N8N, Node.js, Docker, Spring (consumo), PostgreSQL
 Responsabilidades:
 - Diseñar e implementar workflows en N8N
-- Crear integraciones entre microservicios y servicios externos
-- Scripts de utilidad (migración, seed, monitoring)
+- Crear integraciones entre microservicios y servicios externos (webhooks, APIs, eventos)
+- Scripts de utilidad (migración de datos, seed, monitoreo)
 - Configurar webhooks y event handlers
-- Soporte de infraestructura (Docker compose, deploy scripts)
-- Documentar flows de automatización
-- Puente entre backend y herramientas no-code
+- Soporte de infraestructura (Docker Compose, deploy scripts, variables de entorno)
+- Documentar flows de automatización y dependencias entre sistemas
+- Puente entre backend y herramientas no-code / low-code
+- Alertas y notificaciones automáticas (email, Slack, etc.)
 
-### 📱 Mobile Developer (Fase 2 — opcional)
-**Dueño de:** App móvil
-
+### 🗄️ DBA — Database Administrator (DBA)
+Dueño de: Integridad, rendimiento y disponibilidad de los datos
+Stack principal: PostgreSQL, MongoDB, Redis
 Responsabilidades:
-- Desarrollar app React Native o Flutter
-- Consumir APIs del backend
-- Implementar push notifications
-- Store deployment (App Store, Play Store)
-- Sincronización offline-first (si aplica)
+- Diseñar y revisar esquemas relacionales (PostgreSQL) y de documentos (MongoDB) en coordinación con BE1
+- Crear y mantener migraciones de base de datos (Flyway / Liquibase)
+- Definir índices, particionamiento y estrategias de query optimization
+- Configurar y administrar Redis como capa de caché y manejo de sesiones
+- Implementar políticas de backup, recuperación y retención de datos
+- Monitorear performance de queries y proponer optimizaciones (EXPLAIN ANALYZE, slow query log)
+- Gestionar roles, permisos y seguridad de acceso a bases de datos
+- Documentar modelo de datos y diccionario de datos del proyecto
+- Apoyar al equipo de desarrollo con consultas complejas, stored procedures y vistas materializadas
+- Coordinar con FS para consistencia de datos en flujos de automatización
 
 ---
 
@@ -177,7 +193,6 @@ Responsabilidades:
 - JPA/Hibernate + SQL básico
 - Tests unitarios (JUnit 5, Mockito)
 - Consumo de APIs REST
-- Git básico (branch, commit, PR)
 
 **Nice to have:**
 - Spring Security básico
@@ -185,25 +200,36 @@ Responsabilidades:
 - Documentación de APIs (Swagger)
 - Patrones de diseño (Repository, Service, Builder)
 
-### 🎨 Frontend React
+### 🎨 Frontend Angular (FE)
 **Must have:**
-- React 18+ / TypeScript (1+ año)
-- Estado: Redux Toolkit o Zustand o Context API
-- Routing: React Router v6
-- Forms: react-hook-form o Formik
+- Angular, TypeScript, Bootstrap, PrimeNG
+- Estado: NgRx o servicios + signals
+- Routing
+- Forms
 - HTTP: Axios o Fetch
-- CSS: Tailwind o styled-components o MUI
 - Responsive design
 - Consumo de APIs REST
 
 **Nice to have:**
-- Next.js
-- Testing: React Testing Library, Cypress
+- Testing: Jest, Cypress
 - WebSocket
 - PWA basics
 - Design systems
 
-### ⚡ Full-stack / N8N
+### 📱 Mobile Developer (MOB)
+**Must have:**
+- Kotlin / Jetpack Compose o Swift / SwiftUI (1+ año)
+- Consumo de APIs REST
+- Navegación y estado local
+- Local storage / persistence
+
+**Nice to have:**
+- Push notifications
+- App Store / Play Store deployment
+- Offline sync
+- Native modules (Java/Kotlin o Swift/Dart)
+
+### ⚡ Full-stack / N8N (FS)
 **Must have:**
 - JavaScript/TypeScript (1+ año)
 - N8N (instalar, crear workflows, nodos básicos)
@@ -220,18 +246,33 @@ Responsabilidades:
 - Monitoring tools
 - CI/CD pipelines
 
-### 📱 Mobile Developer (Fase 2)
+### 🗄️ DBA — Database Administrator (DBA)
 **Must have:**
-- React Native O Flutter (1+ año)
-- Consumo de APIs REST
-- Navegación y navegación
-- Local storage / persistence
-- Push notifications
+- PostgreSQL, MongoDB, Redis (avanzado)
+- Diseño y optimización de esquemas
+- Backup y recuperación de datos
+- Monitoreo de performance (queries, índices)
+- Gestión de usuarios y permisos
 
 **Nice to have:**
-- App Store / Play Store deployment
-- Offline sync
-- Native modules (Java/Kotlin o Swift/Dart)
+- Replicación, clustering, sharding
+- Herramientas de visualización (Grafana)
+- Scripting (Bash, Python) para automatización
+- Experiencia con cloud databases (RDS, Atlas)
+
+### 🗄️ DBA — Database Administrator (DBA)
+**Must have:**
+- PostgreSQL, MongoDB, Redis (avanzado)
+- Diseño y optimización de esquemas
+- Backup y recuperación de datos
+- Monitoreo de performance (queries, índices)
+- Gestión de usuarios y permisos
+
+**Nice to have:**
+- Replicación, clustering, sharding
+- Herramientas de visualización (Grafana)
+- Scripting (Bash, Python) para automatización
+- Experiencia con cloud databases (RDS, Atlas)
 
 ---
 
@@ -260,4 +301,4 @@ Responsabilidades:
 ---
 
 *Documento vivo. Actualizar cuando el equipo o proceso evolucione.*
-*Última actualización: 2026-03-18*
+*Última actualización: 2026-03-19*
