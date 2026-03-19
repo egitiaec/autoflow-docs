@@ -7,7 +7,7 @@
 ## 1. Daily Standup (15 min máx)
 
 **Hora:** 9:00 AM, todos los días hábiles
-**Dónde:** Llamada remota / presencial
+**Dónde:** Asíncrono por mensaje (ej. Slack, Teams)
 **Quién facilita:** Scrum Master (rota semanal)
 
 ### Formato — cada persona responde 3 preguntas:
