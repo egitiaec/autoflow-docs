@@ -1,8 +1,8 @@
 # AutoFlow — Constitution
 
 > **Project:** AutoFlow — SaaS de automatización para PYMEs ecuatorianas
-> **Version:** 1.0.0
-> **Last Updated:** 2026-03-18
+> **Version:** 1.1.0
+> **Last Updated:** 2026-07-02
 > **Status:** Active
 
 ---
@@ -43,19 +43,19 @@ These decisions are **inviolable** for the MVP. Changes require a formal Archite
 
 | Layer | Technology | Version | Rationale |
 |-------|-----------|---------|-----------|
-| Backend Framework | Spring Boot | 2.1.x | Compatibility with OpenJDK 17 on VPS constraints |
-| Java Runtime | OpenJDK | 17 (LTS) | Long-term support, stability, ecosystem compatibility |
+| Backend Framework | Spring Boot | 3.4.x | Enterprise-grade microservices, native Spring Cloud Gateway, Virtual Threads support |
+| Language / Runtime | Kotlin + OpenJDK | 2.1.x / 21 (LTS) | Kotlin idiomático sobre Java 21 LTS — null safety, data classes, coroutines; soporte hasta 2031+ |
 | Frontend Web | Angular | 17+ | PrimeNG component library, TypeScript, enterprise-grade |
-| Frontend Mobile (iOS) | Swift / SwiftUI | 5.9+ | Native iOS performance and UX |
-| Frontend Mobile (Android) | Kotlin + Jetpack Compose | 1.5+ | Material Design 3, modern declarative UI |
-| Relational DB | PostgreSQL | 15+ | ACID compliance, multitenancy via RLS, JSONB support |
-| Document DB | MongoDB | 7+ | Unstructured data: logs, message history, flexible reports |
-| Cache / Sessions | Redis | 7+ | Rate limiting, session storage, response caching |
-| Message Broker | RabbitMQ | 3.12 | Reliable queues, dead-letter exchanges, event routing |
+| Frontend Mobile (iOS) | Swift / SwiftUI | Swift 6.x / iOS 17+ | Native iOS performance and UX, strict concurrency checking |
+| Frontend Mobile (Android) | Kotlin + Jetpack Compose | Kotlin 2.1.x / Compose BOM 2025.x | Material Design 3, modern declarative UI |
+| Relational DB | PostgreSQL | 17.x | ACID compliance, multitenancy via RLS, JSONB support |
+| Document DB | MongoDB | 8.x | Unstructured data: logs, message history, flexible reports |
+| Cache / Sessions | Redis | 7.4.x | Rate limiting, session storage, response caching |
+| Message Broker | RabbitMQ | 3.13.x | Reliable queues, dead-letter exchanges, event routing |
 | Workflow Engine | N8N | Latest (self-hosted) | No-code automation for tenant-specific workflows |
 | WhatsApp Bridge | Evolution API | Latest | WhatsApp multi-device without Meta template approval friction |
-| Containerization | Docker | 24+ | Docker Compose for local dev, Docker Swarm for production |
-| Reverse Proxy | Nginx | 1.24+ | SSL termination, load balancing, static asset serving |
+| Containerization | Docker | 27.x / Compose 2.32.x | Docker Compose for local dev and production MVP; Kubernetes (k3s) for scale >50 clients |
+| Reverse Proxy | Caddy | 2.9.x | Automatic HTTPS via Let's Encrypt, HTTP/3 (QUIC), zero-config SSL, simple Caddyfile |
 | CI/CD | GitHub Actions | — | Automated build, test, and deploy pipeline |
 | Monitoring | Prometheus + Grafana | — | Metrics collection and dashboards |
 
@@ -63,13 +63,16 @@ These decisions are **inviolable** for the MVP. Changes require a formal Archite
 
 ## 3. Coding Standards
 
-### 3.1 Java / Spring Boot
-- **Package structure:** By feature within each microservice (`com.autoflow.pedidos.controller`, `com.autoflow.pedidos.service`, etc.)
-- **DTOs mandatory:** Entities are never exposed directly in controllers. Use MapStruct for mapping.
+### 3.1 Kotlin / Spring Boot
+- **Language:** Kotlin is the primary language for all backend microservices. Use idiomatic Kotlin: `data class`, `sealed class`, `extension functions`, null safety.
+- **Null safety:** Avoid `!!`. Use `?.`, `?:`, `let {}`. Prefer `val` over `var`.
+- **No Lombok:** Kotlin already provides boilerplate reduction via data classes.
+- **Package structure:** By layer within each microservice (`com.autoflow.{service}.controller`, `.service`, `.repository`, `.model`, `.dto`, `.config`, `.integration`, `.messaging`).
+- **DTOs mandatory:** Entities are never exposed directly in controllers.
 - **Validation:** Bean Validation (`@Valid`, `@NotBlank`, `@Size`, `@Pattern`) on every request DTO.
 - **Error responses:** Standardized format: `{ "error": "CODE", "message": "Human-readable", "details": [...] }`
-- **Async processing:** `@Async` with thread pool configuration. No blocking calls in event listeners.
-- **No null returns.** Use `Optional<>` or throw specific exceptions handled by `@ControllerAdvice`.
+- **Async processing:** Virtual Threads (Java 21) preferred over `@Async` with thread pools. No blocking calls in event listeners.
+- **No null returns.** Throw specific exceptions handled by `@ControllerAdvice`.
 
 ### 3.2 Angular / TypeScript
 - **Standalone components** (Angular 17+). No NgModules for new components.
@@ -160,11 +163,11 @@ A feature is **done** when:
 
 ## 9. Constraints & Trade-offs
 
-- **Spring Boot 2.1.x is a known tech debt.** It is EOL. This is accepted for MVP velocity but must be upgraded to Spring Boot 3.x post-launch. Documented as `TECH-DEBT-001`.
+- **Spring Boot 3.4.x with Java 21 LTS** is the current stack. LTS support until 2031+.
 - **No payment integration in MVP.** Subscription billing is manual. Stripe/PayPal integration is a Phase 2 priority.
 - **Single-region deployment.** No geo-redundancy in MVP. VPS-based in Ecuador or US-East.
 - **Self-hosted N8N.** No N8N Cloud. Each tenant shares the N8N instance with workflow isolation.
 
 ---
 
-*This constitution is a living document. Changes require an ADR and approval from the Tech Lead. Last review: 2026-03-18.*
+*This constitution is a living document. Changes require an ADR and approval from the Tech Lead. Last review: 2026-07-02.*

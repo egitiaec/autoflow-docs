@@ -2,13 +2,13 @@
 
 > Feature: 003-crm
 > Basado en: constitution.md + spec.md
-> Stack: Spring Boot 2.1.x / Java 17 / PostgreSQL / MongoDB / RabbitMQ / Redis
+> Stack: Spring Boot 3.4.x / Java 21 / PostgreSQL / MongoDB / RabbitMQ / Redis
 
 ## 1. Tech Stack
 
 | Componente | Tecnología | Razón |
 |---|---|---|
-| Framework | Spring Boot 2.1.x (MVC) | Microservicio HTTP tradicional |
+| Framework | Spring Boot 3.4.x (MVC) | Microservicio HTTP tradicional |
 | RDBMS | Spring Data JPA + PostgreSQL | Datos estructurados clientes, etiquetas |
 | Document DB | Spring Data MongoDB | Búsqueda texto libre, notas flexibles |
 | Messaging | Spring AMQP | Sincronización PG→MongoDB |

@@ -2,13 +2,13 @@
 
 > Feature: 005-reportes
 > Basado en: constitution.md + spec.md (005-reportes)
-> Stack: Spring Boot 2.1.x / Java 17 / PostgreSQL / Redis / RabbitMQ / MinIO
+> Stack: Spring Boot 3.4.x / Java 21 / PostgreSQL / Redis / RabbitMQ / MinIO
 
 ## 1. Tech Stack
 
 | Componente | Tecnología | Razón |
 |---|---|---|
-| Framework | Spring Boot 2.1.x (MVC) | Microservicio HTTP tradicional |
+| Framework | Spring Boot 3.4.x (MVC) | Microservicio HTTP tradicional |
 | DB Access | Spring Data JPA | Agregaciones de pedidos |
 | Cache | Spring Data Redis | Dashboard KPI cache (60s) |
 | Excel | Apache POI | Generación de reports .xlsx |

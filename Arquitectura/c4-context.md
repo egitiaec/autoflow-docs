@@ -95,7 +95,8 @@ graph TB
             WPS["💬 whatsapp-service<br/>:8084<br/><small>Evolution API integration,<br/>webhooks, plantillas</small>"]
             NOT["🔔 notifications-service<br/>:8085<br/><small>FCM push, email,<br/>plantillas multi-canal</small>"]
             RPT["📊 reports-service<br/>:8086<br/><small>KPIs, analytics,<br/>export CSV/PDF</small>"]
-            APT["📅 appointment-service<br/>:8087<br/><small>Citas, disponibilidad,<br/>recordatorios</small>"]
+            BILL["🧾 billing-service<br/>:8087<br/><small>Facturación electrónica SRI,<br/>XML firmado, retenciones</small>"]
+            APT["📅 appointment-service<br/>:8088<br/><small>Citas, disponibilidad,<br/>recordatorios</small>"]
         end
 
         subgraph "Motor de Automatización"
@@ -129,12 +130,14 @@ graph TB
     GW --> WPS
     GW --> NOT
     GW --> RPT
+    GW --> BILL
     GW --> APT
     GW -->|"Redis"| RDS
 
     AUTH -->|"JDBC"| PG
     CRM -->|"JDBC"| PG
     ORD -->|"JDBC"| PG
+    BILL -->|"JDBC"| PG
     APT -->|"JDBC"| PG
     WPS -->|"MongoDB"| MDB
     WPS -->|"REST"| RMQ
@@ -159,6 +162,7 @@ graph TB
     style WPS fill:#2e86c1,stroke:#fff,color:#fff
     style NOT fill:#2e86c1,stroke:#fff,color:#fff
     style RPT fill:#2e86c1,stroke:#fff,color:#fff
+    style BILL fill:#2e86c1,stroke:#fff,color:#fff
     style APT fill:#2e86c1,stroke:#fff,color:#fff
     style N8N fill:#ea4b71,stroke:#fff,color:#fff
     style PG fill:#2874a6,stroke:#fff,color:#fff
@@ -179,7 +183,8 @@ graph TB
 | **whatsapp-service** | Spring Boot 3 + WebClient | 8084 | MongoDB |
 | **notifications-service** | Spring Boot 3 + Firebase Admin SDK | 8085 | MongoDB |
 | **reports-service** | Spring Boot 3 + JPA + MongoDB | 8086 | PostgreSQL + MongoDB |
-| **appointment-service** | Spring Boot 3 + Spring Data JPA | 8087 | PostgreSQL |
+| **billing-service** | Spring Boot 3 + Spring Data JPA | 8087 | PostgreSQL |
+| **appointment-service** | Spring Boot 3 + Spring Data JPA | 8088 | PostgreSQL |
 | **n8n** | N8N (self-hosted) | 5678 | PostgreSQL (interna) |
 | **PostgreSQL** | PostgreSQL 17 | 5432 | — |
 | **MongoDB** | MongoDB 8 | 27017 | — |
@@ -280,7 +285,7 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph "appointment-service (:8087)"
+    subgraph "appointment-service (:8088)"
         CTRL_APT["AppointmentController"]
         CTRL_SCHED["ScheduleController"]
         CTRL_SVC["ServiceController"]
@@ -433,7 +438,7 @@ Cliente WhatsApp
 ### 4.2 Flujo Reserva de Cita
 
 ```
-Cliente/App → API Gateway → appointment-service (:8087)
+Cliente/App → API Gateway → appointment-service (:8088)
   → availabilityService.verificarDisponibilidad()
     → Google Calendar API (GET /freebusy)
     → Custom API del negocio (si configurado)
@@ -468,7 +473,8 @@ autoflow-network (bridge)
 ├── autoflow-whatsapp   :8084
 ├── autoflow-notifications :8085
 ├── autoflow-reports    :8086
-├── autoflow-appointments :8087
+├── autoflow-billing     :8087
+├── autoflow-appointments :8088
 ├── autoflow-n8n        :5678
 ├── autoflow-postgres   :5432
 ├── autoflow-mongo      :27017

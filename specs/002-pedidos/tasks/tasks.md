@@ -8,7 +8,7 @@
 ## T1: Setup + Migraciones Flyway (3h)
 **Ref spec:** Sección 6 (Modelo de Datos), Plan §2
 
-- [ ] Inicializar Spring Boot 2.1.x (MVC, Tomcat)
+- [ ] Inicializar Spring Boot 3.4.x (MVC, Tomcat)
 - [ ] V1__create_pedidos_table.sql (CHECK estado/canal)
 - [ ] V2__create_pedido_items_table.sql (subtotal GENERATED ALWAYS AS)
 - [ ] V3__create_pedido_historial_table.sql

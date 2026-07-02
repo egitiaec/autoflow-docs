@@ -178,5 +178,5 @@ POST   /api/whatsapp/evolution/webhook                    → Webhook Evolution
 
 - Evolution API como fallback cuando Meta Business API no está aprobada
 - Las credenciales de WhatsApp se almacenan encriptadas (AES-256 con key en env var)
-- El webhook de Meta requiere HTTPS — usar Nginx con SSL
+- El webhook de Meta requiere HTTPS — usar Caddy con SSL automático (Let's Encrypt)
 - MongoDB indexes optimizados para queries de conversación: `{ tenant_id, from, timestamp DESC }`

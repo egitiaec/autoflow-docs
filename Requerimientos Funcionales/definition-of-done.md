@@ -105,25 +105,23 @@ Una Historia de Usuario debe cumplir **todos** los siguientes criterios antes de
 
 ## 3. Estándares de Código para el Equipo
 
-### Backend — Spring Boot (Java 17+)
+### Backend — Spring Boot 3.4.x (Kotlin + Java 21)
 
 #### Estructura del Proyecto
 ```
-src/main/java/com/egit/autoflow/{service}/
+src/main/kotlin/com/autoflow/{service}/
 ├── controller/
-│   └── {Resource}Controller.java        # REST endpoints (thin controllers)
+│   └── {Resource}Controller.kt          # REST endpoints (thin controllers)
 ├── service/
-│   ├── {Resource}Service.java           # Business logic
-│   └── {Resource}ServiceImpl.java       # Implementation
+│   └── {Resource}Service.kt             # Business logic
 ├── repository/
-│   └── {Resource}Repository.java        # Spring Data JPA / MongoDB
-├── model/
-│   ├── entity/                          # JPA entities / MongoDB documents
-│   ├── dto/                             # Request/Response DTOs
-│   └── mapper/                          # Entity ↔ DTO mappers
+│   └── {Resource}Repository.kt          # Spring Data JPA / MongoDB
+├── model/                               # JPA entities / MongoDB documents
+├── dto/                                 # Request/Response DTOs (data class)
 ├── config/                              # Spring configurations
-├── exception/                           # Custom exceptions + @ControllerAdvice
-└── util/                                # Utility classes
+├── integration/                         # External API clients (si aplica)
+├── messaging/                           # RabbitMQ publishers/consumers
+└── {Service}Application.kt              # @SpringBootApplication
 ```
 
 #### Naming Conventions
