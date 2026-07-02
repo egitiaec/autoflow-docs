@@ -2,13 +2,13 @@
 
 > Feature: 004-whatsapp
 > Basado en: constitution.md + spec.md (004-whatsapp)
-> Stack: Spring Boot 2.1.x / Java 17 / PostgreSQL / MongoDB / RabbitMQ
+> Stack: Spring Boot 3.4.x / Java 21 / PostgreSQL / MongoDB / RabbitMQ
 
 ## 1. Tech Stack
 
 | Componente | Tecnología | Razón |
 |---|---|---|
-| Framework | Spring Boot 2.1.x (MVC) | Microservicio HTTP tradicional |
+| Framework | Spring Boot 3.4.x (MVC) | Microservicio HTTP tradicional |
 | RDBMS | Spring Data JPA | Conexiones, plantillas, instancias Evolution |
 | Document DB | Spring Data MongoDB | Mensajes WhatsApp (alto volumen, flexible) |
 | HTTP Client | RestTemplate | Llamadas a Meta Graph API y Evolution API |
@@ -132,4 +132,4 @@ dependencies {
 |---|---|
 | Meta rechaza cuenta business | Evolution API como fallback (HU-019) |
 | Token Meta expirado | Refresh automático via Meta OAuth |
-| Webhook sin HTTPS | Nginx SSL obligatorio |
+| Webhook sin HTTPS | Caddy SSL obligatorio (Let's Encrypt automático) |

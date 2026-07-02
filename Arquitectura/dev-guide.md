@@ -278,6 +278,9 @@ cd services/notifications-service && ./gradlew bootRun
 cd services/reports-service && ./gradlew bootRun
 
 # Terminal 8
+cd services/billing-service && ./gradlew bootRun
+
+# Terminal 9
 cd services/appointment-service && ./gradlew bootRun
 ```
 
@@ -305,7 +308,8 @@ cd services/appointment-service && ./gradlew bootRun
 | **whatsapp-service** | 8084 | http://localhost:8084 |
 | **notifications-service** | 8085 | http://localhost:8085 |
 | **reports-service** | 8086 | http://localhost:8086 |
-| **appointment-service** | 8087 | http://localhost:8087 |
+| **billing-service** | 8087 | http://localhost:8087 |
+| **appointment-service** | 8088 | http://localhost:8088 |
 | **N8N** | 5678 | http://localhost:5678 |
 | **PostgreSQL** | 5432 | jdbc:postgresql://localhost:5432/autoflow_db |
 | **MongoDB** | 27017 | mongodb://localhost:27017 |

@@ -9,7 +9,7 @@
 ## T1: Setup proyecto Spring Cloud Gateway (2h)
 **Ref spec:** Plan §2 (Estructura de paquetes)
 
-- [ ] Inicializar Spring Boot 2.1.x con Spring Cloud Gateway
+- [ ] Inicializar Spring Boot 3.4.x con Spring Cloud Gateway
 - [ ] Configurar build.gradle con dependencias (Plan §8)
 - [ ] Crear estructura de paquetes: config/, auth/, user/, common/, ratelimit/
 - [ ] Configurar application.yml con profiles dev/prod

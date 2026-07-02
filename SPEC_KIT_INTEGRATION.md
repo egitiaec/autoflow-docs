@@ -149,7 +149,7 @@ La constitución se genera con `/speckit.constitution`. Este es el template base
 - **Cada microservicio tiene su propio esquema de BD** — PostgreSQL schemas o instancias separadas
 
 ### 2. Tecnologías (inviolable)
-- **Backend:** Spring Boot 3.x + Java 21 LTS
+- **Backend:** Spring Boot 3.4.x + Kotlin + Java 21 LTS
 - **Frontend Web:** Angular 17+ + PrimeNG
 - **Frontend Móvil:** Android (Kotlin) + iOS (Swift/SwiftUI)
 - **PostgreSQL** para datos transaccionales
@@ -159,9 +159,9 @@ La constitución se genera con `/speckit.constitution`. Este es el template base
 - **Docker Compose** para desarrollo local
 
 ### 3. Coding Standards
-- **Java:** Seguir Google Java Style Guide con ajustes del equipo
-- **Lombok** permitido para boilerplate (getters, builders), prohibido en dominio crítico
-- **Paquetes por feature** dentro de cada microservicio, no por capa
+- **Kotlin** como lenguaje principal: `data class`, `sealed class`, null safety, `val` sobre `var`
+- **No Lombok** — Kotlin ya provee reducción de boilerplate
+- **Paquetes por capa** dentro de cada microservicio (controller, service, repository, model, dto, config, integration, messaging)
 - **DTOs obligatorios** — nunca exponer entidades JPA en controllers
 - **Validación con Bean Validation 3.0** — `@Valid` en todos los controllers
 - **Manejo global de excepciones** — `@ControllerAdvice` por microservicio

@@ -2,13 +2,13 @@
 
 > Feature: 006-configuracion
 > Basado en: constitution.md + spec.md (006-configuracion)
-> Stack: Spring Boot 2.1.x / Java 17 / PostgreSQL / MinIO
+> Stack: Spring Boot 3.4.x / Java 21 / PostgreSQL / MinIO
 
 ## 1. Tech Stack
 
 | Componente | Tecnología | Razón |
 |---|---|---|
-| Framework | Spring Boot 2.1.x (MVC) | Microservicio HTTP tradicional |
+| Framework | Spring Boot 3.4.x (MVC) | Microservicio HTTP tradicional |
 | DB Access | Spring Data JPA | Configuración por tenant |
 | Storage | MinIO Client | Logos de branding |
 | Image | Thumbnailator | Generación de thumbnails 200x200 |

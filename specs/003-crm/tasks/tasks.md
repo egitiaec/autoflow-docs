@@ -8,7 +8,7 @@
 ## T1: Setup + Migraciones + MongoDB config (3h)
 **Ref spec:** Sección 6 (Modelo de Datos)
 
-- [ ] Inicializar Spring Boot 2.1.x con JPA + MongoDB + Redis + RabbitMQ
+- [ ] Inicializar Spring Boot 3.4.x con JPA + MongoDB + Redis + RabbitMQ
 - [ ] V1__create_clientes_table.sql (índices tenant, cedula, telefono)
 - [ ] V2__create_etiquetas_table.sql (UNIQUE tenant_id+nombre)
 - [ ] V3__create_cliente_etiquetas_table.sql

@@ -2,13 +2,13 @@
 
 > Feature: 002-pedidos
 > Basado en: constitution.md + spec.md
-> Stack: Spring Boot 2.1.x / Java 17 / PostgreSQL / RabbitMQ / Redis
+> Stack: Spring Boot 3.4.x / Java 21 / PostgreSQL / RabbitMQ / Redis
 
 ## 1. Tech Stack
 
 | Componente | Tecnología | Razón |
 |---|---|---|
-| Framework | Spring Boot 2.1.x (MVC, Tomcat) | Microservicio HTTP tradicional |
+| Framework | Spring Boot 3.4.x (MVC, Tomcat) | Microservicio HTTP tradicional |
 | DB Access | Spring Data JPA + Flyway | Migraciones, repositories |
 | Messaging | Spring AMQP (RabbitMQ) | Eventos para WhatsApp/CRM/N8N |
 | Cache | Spring Data Redis | Cache detalle pedido (30s TTL) |

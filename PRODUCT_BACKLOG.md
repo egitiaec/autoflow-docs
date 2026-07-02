@@ -1,7 +1,7 @@
 # AutoFlow — Product Backlog
 
 > Suite de automatización para PYMEs ecuatorianas (retail, clínicas, restaurantes).
-> Stack: Spring Boot 2.1.x / Java 17 / PostgreSQL / MongoDB / RabbitMQ / Redis / N8N self-hosted / WhatsApp Business API / Evolution API / Docker Compose
+> Stack: Spring Boot 3.4.x / Kotlin / Java 21 / PostgreSQL 17 / MongoDB 8 / RabbitMQ 3.13 / Redis 7.4 / N8N self-hosted / Evolution API / Docker Compose
 > Moneda: USD | Suscripción: $99–299/mes
 
 ---
@@ -81,11 +81,14 @@
 **Módulo:** API Gateway
 **Sprint:** 1
 **Acceptance Criteria:**
-- [ ] `/api/pedidos/**` → Pedidos Service (puerto 8081)
+- [ ] `/api/auth/**` → Auth Service (puerto 8081)
 - [ ] `/api/crm/**` → CRM Service (puerto 8082)
-- [ ] `/api/whatsapp/**` → WhatsApp Service (puerto 8083)
-- [ ] `/api/reportes/**` → Reportes Service (puerto 8084)
-- [ ] `/api/config/**` → Config Service (puerto 8085)
+- [ ] `/api/pedidos/**` → Orders Service (puerto 8083)
+- [ ] `/api/whatsapp/**` → WhatsApp Service (puerto 8084)
+- [ ] `/api/notifications/**` → Notifications Service (puerto 8085)
+- [ ] `/api/reportes/**` → Reports Service (puerto 8086)
+- [ ] `/api/billing/**` → Billing Service (puerto 8087)
+- [ ] `/api/appointments/**` → Appointment Service (puerto 8088)
 - [ ] Headers propagados: `X-Tenant-Id`, `X-User-Id`, `Authorization`
 - [ ] Timeout de 30s por request downstream; fallback 503 si servicio cae
 **Spec técnica:**
@@ -664,7 +667,7 @@ Todo Story Point completado debe cumplir:
 | # | Riesgo | Impacto | Mitigación |
 |---|--------|---------|------------|
 | R1 | **WhatsApp Business API aprobación lenta** — Meta puede tardar 2-4 semanas en aprobar cuenta y plantillas | Bloquea HU-016, HU-017, HU-018 | Implementar Evolution API (HU-019) como fallback paralelo; iniciar proceso de aprobación Meta el día 1 del proyecto |
-| R2 | **Spring Boot 2.1.x EOL** — versión sin soporte community, vulnerabilidades de seguridad | Deuda técnica acumulada, dificultad de contratación | Planificar upgrade a Spring Boot 3.x post-MVP; documentar como tech debt prioritaria |
+| R2 | **Complejidad de microservicios desde el día 1** — 9 servicios requieren coordinación y testing cross-service | Mayor tiempo de desarrollo y debugging | Empezar con servicios core (auth, orders, crm); agregar los demás incrementalmente; integration tests con Testcontainers |
 | R3 | **Multi-tenancy data isolation** — error de aislamiento expone datos entre tenants | Brecha de seguridad grave, pérdida de confianza legal | Tests de integración específicos para validación cross-tenant; row-level security en PostgreSQL como capa adicional |
 
 ### 🟡 Riesgos Medios

@@ -219,7 +219,42 @@ autoflow/
 │   │   │   └── dto/
 │   │   └── Dockerfile
 │   │
-│   └── 📁 appointment-service/           # Puerto 8087 — Sistema de Citas (NUEVO)
+│   ├── 📁 billing-service/               # Puerto 8087 — Facturación Electrónica SRI (NUEVO v2.3)
+│   │   ├── build.gradle.kts
+│   │   ├── src/
+│   │   │   ├── main/
+│   │   │   │   ├── kotlin/com/autoflow/billing/
+│   │   │   │   │   ├── BillingApplication.kt
+│   │   │   │   │   ├── controller/
+│   │   │   │   │   │   ├── InvoiceController.kt          # Facturas electrónicas SRI
+│   │   │   │   │   │   ├── CreditNoteController.kt       # Notas de crédito
+│   │   │   │   │   │   └── TaxConfigController.kt         # Configuración contribuyente
+│   │   │   │   │   ├── service/
+│   │   │   │   │   │   ├── InvoiceService.kt
+│   │   │   │   │   │   ├── SriAuthorizationService.kt     # Autorización SRI
+│   │   │   │   │   │   ├── XmlSigningService.kt           # Firma electrónica XML
+│   │   │   │   │   │   └── CreditNoteService.kt
+│   │   │   │   │   ├── repository/
+│   │   │   │   │   │   ├── InvoiceRepository.kt           # JPA
+│   │   │   │   │   │   └── CreditNoteRepository.kt
+│   │   │   │   │   ├── model/
+│   │   │   │   │   │   ├── ElectronicInvoice.kt            # @Entity JPA
+│   │   │   │   │   │   ├── CreditNote.kt
+│   │   │   │   │   │   └── TaxpayerConfig.kt              # Datos contribuyente, certificado .p12
+│   │   │   │   │   ├── dto/
+│   │   │   │   │   ├── config/
+│   │   │   │   │   └── messaging/
+│   │   │   │   │       └── EventConsumer.kt                # order.delivered → genera factura
+│   │   │   │   └── resources/
+│   │   │   │       ├── application.yml
+│   │   │   │       └── db/migration/
+│   │   │   │           └── V1__initial_billing_schema.sql
+│   │   │   └── test/
+│   │   │       └── kotlin/com/autoflow/billing/
+│   │   │           └── service/InvoiceServiceTest.kt
+│   │   └── Dockerfile
+│   │
+│   └── 📁 appointment-service/           # Puerto 8088 — Sistema de Citas (NUEVO v2.2)
 │       ├── build.gradle.kts
 │       ├── src/
 │       │   ├── main/
@@ -412,7 +447,8 @@ Cada microservicio sigue el **estándar Spring Boot** con la estructura de paque
 | `whatsapp-service` | 8084 | MongoDB | Spring Data MongoDB |
 | `notifications-service` | 8085 | MongoDB | Spring Data MongoDB + Firebase Admin SDK |
 | `reports-service` | 8086 | PostgreSQL + MongoDB | Spring Data JPA + MongoDB |
-| `appointment-service` | 8087 | PostgreSQL | Spring Data JPA |
+| `billing-service` | 8087 | PostgreSQL | Spring Data JPA |
+| `appointment-service` | 8088 | PostgreSQL | Spring Data JPA |
 
 ### 3.2 `services/appointment-service/` — Módulo Nuevo (Detallado)
 

@@ -2,7 +2,7 @@
 
 > Feature: 001-api-gateway
 > Basado en: constitution.md + spec.md
-> Stack: Spring Boot 2.1.x / Java 17
+> Stack: Spring Boot 3.4.x / Java 21
 
 ## 1. Tech Stack
 
