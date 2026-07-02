@@ -619,6 +619,444 @@
 
 ---
 
+## MÓDULO 7: FACTURACIÓN ELECTRÓNICA SRI
+
+### HU-028: Configuración fiscal del contribuyente
+**Como** administrador de empresa,
+**Quiero** registrar los datos fiscales de mi negocio (RUC, razón social, establecimiento, punto de emisión, tipo contribuyente),
+**Para** que las facturas electrónicas se generen con la información correcta según el SRI.
+**Prioridad:** Alta
+**Story Points:** 5
+**Módulo:** Facturación
+**Sprint:** 5
+**Acceptance Criteria:**
+- [ ] POST `/api/billing/config` crea configuración fiscal del tenant
+- [ ] Campos: ruc, razon_social, nombre_comercial, direccion_matricial, establecimiento (3 dígitos), punto_emision (3 dígitos), tipo_contribuyente
+- [ ] Valida RUC ecuatoriano (13 dígitos) con checksum algorítmico
+- [ ] Valida que establecimiento y punto de emisión sean numéricos (001-999)
+- [ ] GET `/api/billing/config` retorna configuración actual
+- [ ] PUT `/api/billing/config` actualiza datos fiscales (solo admin)
+- [ ] POST `/api/billing/environment/switch` cambia entre ambiente pruebas ↔ producción del SRI
+**Spec técnica:**
+- Endpoint: GET/POST/PUT `/api/billing/config`, POST `/api/billing/environment/switch`
+- Modelo: `TenantBillingConfig` (PostgreSQL) — id, tenant_id, ruc, razon_social, nombre_comercial, direccion_matricial, establecimiento, punto_emision, tipo_contribuyente, ambiente_sri[PRUEBA|PRODUCCION], signing_provider, created_at, updated_at
+- Variables de entorno: `BILLING_SRI_ENVIRONMENT`, `BILLING_SRI_RECEPTION_URL`, `BILLING_SRI_AUTHORIZATION_URL`
+- Dependencias: HU-001
+
+---
+
+### HU-029: Gestión de certificados digitales (.p12)
+**Como** administrador,
+**Quiero** subir mi certificado de firma electrónica (.p12/.pfx) y gestionar su vigencia,
+**Para** poder firmar comprobantes electrónicos válidos ante el SRI.
+**Prioridad:** Alta
+**Story Points:** 8
+**Módulo:** Facturación
+**Sprint:** 5
+**Acceptance Criteria:**
+- [ ] POST `/api/billing/certificate/upload` recibe archivo .p12/.pfx + contraseña
+- [ ] Valida que el certificado sea un PKCS#12 válido y no esté expirado
+- [ ] Almacena certificado encriptado en HashiCorp Vault (producción) o Docker Secrets (staging)
+- [ ] GET `/api/billing/certificate` retorna metadata (emisor, vigencia, proveedor) sin exponer el archivo
+- [ ] POST `/api/billing/rotate-certificate` permite rotar certificado sin downtime
+- [ ] Alerta automática 30 días antes de expiración del certificado (evento `certificate.expiring`)
+- [ ] Soporta proveedores: BCE, Security Data (SDS), ANF Ecuador, Ecuacert, GlobalSign, DigiCert
+**Spec técnica:**
+- Endpoint: POST `/api/billing/certificate/upload`, GET `/api/billing/certificate`, POST `/api/billing/rotate-certificate`
+- Storage: HashiCorp Vault path `secret/data/billing/{tenant_id}/certificate`
+- Validación: Java KeyStore API para leer .p12 y verificar cadena de certificados
+- Dependencias: HU-028
+
+---
+
+### HU-030: Generación de factura electrónica
+**Como** sistema (automático),
+**Quiero** generar una factura electrónica con clave de acceso de 49 dígitos cuando un pedido sea confirmado,
+**Para** cumplir con la normativa de facturación electrónica del SRI de Ecuador.
+**Prioridad:** Alta
+**Story Points:** 13
+**Módulo:** Facturación
+**Sprint:** 5
+**Acceptance Criteria:**
+- [ ] Consume evento `order.confirmed` de RabbitMQ y genera factura automáticamente
+- [ ] POST `/api/billing/invoices/generate` permite generación manual con `order_id`
+- [ ] Genera clave de acceso de 49 dígitos según algoritmo del SRI (fecha, tipo comprobante, RUC, ambiente, serie, secuencial, código numérico, dígito verificador módulo 11)
+- [ ] Genera XML del comprobante conforme al XSD oficial del SRI (versión 1.1.0)
+- [ ] Secuencial auto-incrementa por establecimiento + punto de emisión
+- [ ] Calcula subtotal, IVA (15%), ICE (si aplica), IR (si aplica), total
+- [ ] Almacena factura en PostgreSQL con status `GENERADA`
+- [ ] Genera PDF con datos de la factura y código QR de validación SRI
+**Spec técnica:**
+- Endpoint: POST `/api/billing/invoices/generate` body: `{ "order_id": "..." }`
+- Modelo: `Invoice` (PostgreSQL) — id, tenant_id, order_id, invoice_type, clave_acceso, secuencial, establishment_code, emission_point, invoice_date, subtotal, iva, ice, ir, total, status[GENERADA|FIRMADA|ENVIADA|AUTORIZADA|RECHAZADA], sri_authorization_number, sri_environment, created_at
+- Modelo: `InvoiceItem` (PostgreSQL) — id, invoice_id, product_code, description, quantity, unit_price, subtotal, iva_rate
+- QR URL base: `https://verififact.sri.gob.ec/cgi-bin/cfaces/CeFacSWSPLE?cmp=`
+- Dependencias: HU-028, HU-029, HU-008
+
+---
+
+### HU-031: Firma electrónica y envío al SRI
+**Como** sistema (automático),
+**Quiero** firmar electrónicamente el XML de la factura y enviarlo al web service del SRI para autorización,
+**Para** que la factura tenga validez legal y el cliente reciba su comprobante autorizado.
+**Prioridad:** Alta
+**Story Points:** 13
+**Módulo:** Facturación
+**Sprint:** 5
+**Acceptance Criteria:**
+- [ ] POST `/api/billing/invoices/{id}/sign` firma el XML con certificado .p12 del tenant (RSA-SHA256)
+- [ ] POST `/api/billing/invoices/{id}/send-to-sri` envía XML firmado al web service de recepción del SRI
+- [ ] Maneja respuestas: RECIBIDA, DEVUELTA (errores de formato), RECHAZADA
+- [ ] Si RECIBIDA → consulta servicio de autorización del SRI con reintentos (máx. 3 intentos, backoff exponencial)
+- [ ] Si AUTORIZADA → almacena número de autorización, fecha y XML autorizado
+- [ ] GET `/api/billing/invoices/{id}/authorized-xml` retorna XML autorizado
+- [ ] Publica evento `invoice.authorized` en RabbitMQ → notifica al tenant (push + email + WhatsApp)
+- [ ] Registra cada interacción con SRI en `InvoiceSriLog` para auditoría
+- [ ] Almacena XML y PDF en MinIO: `invoices/{tenantId}/{year}/{month}/{claveAcceso}.xml|pdf`
+**Spec técnica:**
+- Endpoint: POST `/api/billing/invoices/{id}/sign`, POST `/api/billing/invoices/{id}/send-to-sri`, GET `/api/billing/invoices/{id}/authorized-xml`
+- SRI Pruebas: `https://celcer.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline`
+- SRI Producción: `https://cel.sri.gob.ec/comprobantes-electronicos-ws/RecepcionComprobantesOffline`
+- Firma: Apache XML Security / BouncyCastle para XAdES-BES
+- Modelo: `InvoiceSriLog` (PostgreSQL) — id, invoice_id, action, request_xml, response_xml, sri_status, sri_messages, attempt, created_at
+- Dependencias: HU-029, HU-030
+
+---
+
+### HU-032: Notas de crédito electrónicas
+**Como** administrador,
+**Quiero** generar notas de crédito electrónicas para anular o modificar facturas autorizadas,
+**Para** corregir errores o procesar devoluciones conforme a la normativa del SRI.
+**Prioridad:** Media
+**Story Points:** 8
+**Módulo:** Facturación
+**Sprint:** 6
+**Acceptance Criteria:**
+- [ ] POST `/api/billing/invoices/{invoiceId}/credit-note` genera nota de crédito referenciando factura original
+- [ ] Requiere: motivo de modificación, items afectados, montos
+- [ ] Genera clave de acceso propia (tipo comprobante 04)
+- [ ] Firma XML y envía al SRI (mismo flujo que factura)
+- [ ] Valida que la factura original esté en estado AUTORIZADA
+- [ ] Publica evento `invoice.voided` en RabbitMQ
+- [ ] Actualiza estado de factura original a ANULADA (si nota de crédito es total)
+**Spec técnica:**
+- Endpoint: POST `/api/billing/invoices/{invoiceId}/credit-note`
+- Modelo: `CreditNote` (PostgreSQL) — id, tenant_id, invoice_id_original, clave_acceso_original, clave_acceso_nota, secuencial, motivo, total_abonado, status[GENERADA|FIRMADA|ENVIADA|AUTORIZADA|RECHAZADA], created_at
+- Dependencias: HU-030, HU-031
+
+---
+
+## MÓDULO 8: CITAS (APPOINTMENTS)
+
+### HU-033: Configuración de horarios de atención
+**Como** administrador de negocio,
+**Quiero** configurar los días y horarios de atención de mi establecimiento,
+**Para** que los clientes solo puedan reservar en horarios disponibles.
+**Prioridad:** Alta
+**Story Points:** 5
+**Módulo:** Citas
+**Sprint:** 5
+**Acceptance Criteria:**
+- [ ] POST `/api/appointments/schedules` crea horario por día de semana (lunes a domingo)
+- [ ] Campos por día: day_of_week, open_time (HH:mm), close_time (HH:mm), is_closed (bool)
+- [ ] GET `/api/appointments/schedules` retorna horarios del tenant
+- [ ] PUT `/api/appointments/schedules/{id}` modifica horario individual
+- [ ] Soporta excepciones (feriados, vacaciones): valid_from, valid_until para horarios temporales
+- [ ] Valida que open_time < close_time y que no haya solapamiento
+- [ ] Timezone fijo: America/Guayaquil (GMT-5)
+**Spec técnica:**
+- Endpoint: GET/POST `/api/appointments/schedules`, PUT `/api/appointments/schedules/{id}`
+- Modelo: `BusinessSchedule` (PostgreSQL) — id, tenant_id, day_of_week (0-6), open_time, close_time, is_closed, valid_from, valid_until, created_at
+- Dependencias: HU-001
+
+---
+
+### HU-034: Tipos de servicio con duración y precio
+**Como** administrador,
+**Quiero** definir los tipos de servicio que ofrece mi negocio con duración, buffer y precio,
+**Para** que las citas se reserven con la duración correcta y el cliente conozca el costo.
+**Prioridad:** Alta
+**Story Points:** 3
+**Módulo:** Citas
+**Sprint:** 5
+**Acceptance Criteria:**
+- [ ] CRUD `/api/appointments/services` gestiona tipos de servicio
+- [ ] Campos: name, duration_minutes, buffer_minutes (tiempo entre citas), price, active (bool)
+- [ ] Valida: duration_minutes > 0, buffer_minutes ≥ 0, price ≥ 0
+- [ ] Servicio inactivo no aparece en disponibilidad pero se mantiene para histórico
+- [ ] GET retorna lista paginada con filtro `?active=true`
+**Spec técnica:**
+- Endpoint: CRUD `/api/appointments/services`
+- Modelo: `AppointmentService` (PostgreSQL) — id, tenant_id, name, duration_minutes, buffer_minutes, price, active, created_at
+- Dependencias: HU-001
+
+---
+
+### HU-035: Reserva de cita con verificación de disponibilidad
+**Como** cliente (vía app o WhatsApp),
+**Quiero** reservar una cita seleccionando fecha, hora y tipo de servicio,
+**Para** asegurar mi turno en el horario que me conviene.
+**Prioridad:** Alta
+**Story Points:** 8
+**Módulo:** Citas
+**Sprint:** 5
+**Acceptance Criteria:**
+- [ ] GET `/api/appointments/availability?date=2026-04-01&serviceId=...` retorna slots disponibles del día
+- [ ] Calcula slots basándose en: horario del negocio, duración del servicio, buffer, citas existentes
+- [ ] POST `/api/appointments` crea cita con estado CONFIRMED
+- [ ] Validaciones: slot disponible, anticipación mínima (configurable, default 2h), anticipación máxima (configurable, default 30 días)
+- [ ] Distributed lock en Redis para evitar doble reserva en el mismo slot (race condition)
+- [ ] Publica evento `appointment.created` en RabbitMQ → notifica al cliente (WhatsApp + Push)
+- [ ] Respuesta incluye: id, fecha/hora, servicio, duración, estado
+**Spec técnica:**
+- Endpoint: GET `/api/appointments/availability`, POST `/api/appointments`
+- Modelo: `Appointment` (PostgreSQL) — id, tenant_id, client_id, service_id, staff_id, start_time, end_time, status[CONFIRMED|CANCELLED|COMPLETED|NO_SHOW], google_calendar_event_id, notes, created_at
+- Redis lock: `appointment:lock:{tenantId}:{date}:{slot}` TTL 10s
+- Dependencias: HU-033, HU-034, HU-011
+
+---
+
+### HU-036: Gestión de citas (cancelar, reprogramar, no-show)
+**Como** operador o administrador,
+**Quiero** cancelar, reprogramar o marcar como no-show una cita existente,
+**Para** mantener la agenda actualizada y registrar inasistencias.
+**Prioridad:** Alta
+**Story Points:** 5
+**Módulo:** Citas
+**Sprint:** 6
+**Acceptance Criteria:**
+- [ ] PUT `/api/appointments/{id}/cancel` cancela cita con motivo obligatorio
+- [ ] Política de cancelación configurable: libre hasta X horas antes (default 24h), después requiere autorización admin
+- [ ] PUT `/api/appointments/{id}/reschedule` reprogramar a nueva fecha/hora (valida disponibilidad)
+- [ ] PUT `/api/appointments/{id}/status` body: `{ "status": "NO_SHOW" }` registra inasistencia
+- [ ] Cada cambio publica evento correspondiente: `appointment.cancelled`, `appointment.confirmed`
+- [ ] GET `/api/appointments?status=CONFIRMED&desde=...&hasta=...` lista citas con filtros
+- [ ] GET `/api/appointments/upcoming` retorna próximas citas (para recordatorios)
+**Spec técnica:**
+- Endpoint: PUT `/api/appointments/{id}/cancel`, PUT `/api/appointments/{id}/reschedule`, GET `/api/appointments`, GET `/api/appointments/upcoming`
+- Transiciones válidas: CONFIRMED→CANCELLED, CONFIRMED→COMPLETED, CONFIRMED→NO_SHOW; CANCELLED→CONFIRMED (re-reserva)
+- Dependencias: HU-035
+
+---
+
+### HU-037: Integración con Google Calendar
+**Como** administrador,
+**Quiero** sincronizar las citas con Google Calendar de mi negocio,
+**Para** ver la agenda en mi calendario habitual y evitar conflictos.
+**Prioridad:** Media
+**Story Points:** 8
+**Módulo:** Citas
+**Sprint:** 6
+**Acceptance Criteria:**
+- [ ] POST `/api/appointments/integrations/google` configura integración Google Calendar por tenant
+- [ ] Al confirmar cita → crea evento en Google Calendar (POST /calendars/{id}/events)
+- [ ] Al cancelar cita → elimina evento de Google Calendar
+- [ ] Al reprogramar → actualiza evento en Google Calendar
+- [ ] GET `/api/appointments/availability` consulta freebusy de Google Calendar para verificar conflictos externos
+- [ ] Soporta Service Account con delegación de dominio (configurable por tenant)
+- [ ] Manejo de errores: si Google Calendar no responde, la cita se crea igual (graceful degradation)
+**Spec técnica:**
+- Endpoint: POST `/api/appointments/integrations/google`
+- Modelo: `TenantIntegration` (PostgreSQL) — id, tenant_id, integration_type[GOOGLE_CALENDAR|CUSTOM_API], config_json, active
+- Google API: `google-api-services-calendar` SDK, OAuth2 Service Account
+- Variables: `GOOGLE_CALENDAR_SERVICE_ACCOUNT_JSON`, `GOOGLE_CALENDAR_DELEGATED_USER`
+- Dependencias: HU-035, HU-036
+
+---
+
+### HU-038: Recordatorios automáticos de citas
+**Como** cliente con cita reservada,
+**Quiero** recibir recordatorios automáticos antes de mi cita (24h y 2h antes),
+**Para** no olvidar mi turno y poder cancelar a tiempo si es necesario.
+**Prioridad:** Media
+**Story Points:** 5
+**Módulo:** Citas
+**Sprint:** 6
+**Acceptance Criteria:**
+- [ ] Scheduler interno consulta citas próximas cada 15 minutos
+- [ ] 24 horas antes: publica evento `appointment.reminder` → envía WhatsApp + Push notification
+- [ ] 2 horas antes: publica evento `appointment.reminder` → envía Push notification
+- [ ] Mensaje incluye: nombre del servicio, fecha/hora, dirección del negocio, link para cancelar
+- [ ] Frecuencia de recordatorios configurable por tenant (PUT `/api/config/appointments/reminders`)
+- [ ] No envía recordatorio si la cita ya fue cancelada
+- [ ] Registra envío en `notifications_log` para evitar duplicados
+**Spec técnica:**
+- Scheduler: Spring `@Scheduled(fixedRate = 900000)` (cada 15 min)
+- Query: `SELECT * FROM appointments WHERE start_time BETWEEN NOW() + interval '23h 45m' AND NOW() + interval '24h 15m' AND status = 'CONFIRMED' AND reminder_24h_sent = false`
+- Eventos RabbitMQ: `appointment.reminder` consumido por notifications-service y whatsapp-service
+- Dependencias: HU-035, HU-016
+
+---
+
+## MÓDULO 9: FRONTEND WEB (ANGULAR)
+
+### HU-039: Scaffold Angular + autenticación (login/registro)
+**Como** usuario,
+**Quiero** acceder a la plataforma web con login y registro desde el navegador,
+**Para** gestionar mi negocio desde cualquier dispositivo con pantalla grande.
+**Prioridad:** Alta
+**Story Points:** 8
+**Módulo:** Frontend Web
+**Sprint:** 2
+**Acceptance Criteria:**
+- [ ] Scaffold Angular 17+ con PrimeNG, standalone components, lazy loading
+- [ ] Pantalla de login: email + contraseña → consume POST `/api/auth/login`
+- [ ] Pantalla de registro: nombre empresa, RUC, email, contraseña → consume POST `/api/auth/register`
+- [ ] Almacena JWT en memoria (no localStorage) con refresh automático via interceptor
+- [ ] Guard de autenticación: rutas protegidas redirigen a `/login` si no hay token válido
+- [ ] Interceptor HTTP: agrega `Authorization: Bearer {token}` a cada request
+- [ ] Manejo de errores 401 → refresh token automático o redirect a login
+- [ ] Responsive: funcional en desktop (1440px) y tablet (768px)
+**Spec técnica:**
+- Framework: Angular 17+ con signals, standalone components
+- UI Library: PrimeNG (theme AutoFlow: primario #4F46E5 Indigo)
+- Auth: `AuthService` + `AuthInterceptor` + `AuthGuard`
+- State: Angular signals para estado de auth; no NgRx para MVP
+- Dependencias: HU-001, HU-002
+
+---
+
+### HU-040: Layout principal (sidebar, header, routing)
+**Como** usuario autenticado,
+**Quiero** navegar entre módulos (Dashboard, Pedidos, CRM, WhatsApp, Reportes, Config) desde un sidebar,
+**Para** acceder rápidamente a cada sección de la plataforma.
+**Prioridad:** Alta
+**Story Points:** 5
+**Módulo:** Frontend Web
+**Sprint:** 2
+**Acceptance Criteria:**
+- [ ] Layout con sidebar izquierdo colapsable + header superior
+- [ ] Sidebar items: Dashboard, Pedidos, Clientes, WhatsApp, Reportes, Citas, Configuración
+- [ ] Header: avatar del usuario, nombre del tenant, botón de notificaciones, toggle sidebar
+- [ ] Routing lazy-loaded por módulo: `/dashboard`, `/pedidos`, `/clientes`, `/whatsapp`, `/reportes`, `/citas`, `/config`
+- [ ] Sidebar indica ruta activa con highlight visual
+- [ ] Sidebar muestra/oculta items según rol del usuario (admin vs operator vs viewer)
+- [ ] Responsive: sidebar se colapsa a iconos en tablet, se oculta en mobile con hamburger
+**Spec técnica:**
+- Componentes: `LayoutComponent`, `SidebarComponent`, `HeaderComponent` (standalone)
+- PrimeNG: `p-sidebar`, `p-menuitem`, `p-avatar`, `p-badge`
+- Colores del Design System: primario #4F46E5, sidebar bg #1E1B4B
+- Dependencias: HU-039
+
+---
+
+### HU-041: Dashboard de ventas (frontend)
+**Como** manager,
+**Quiero** ver los KPIs de ventas en un dashboard visual con gráficos y tarjetas,
+**Para** tener visibilidad instantánea del rendimiento de mi negocio.
+**Prioridad:** Alta
+**Story Points:** 8
+**Módulo:** Frontend Web
+**Sprint:** 3
+**Acceptance Criteria:**
+- [ ] Consume GET `/api/reportes/dashboard` y renderiza KPIs
+- [ ] Tarjetas de KPI: ventas_hoy (USD), ventas_semana, ventas_mes, pedidos_hoy, ticket_promedio
+- [ ] Gráfico de barras: ventas por día (últimos 7 días) — PrimeNG Charts (Chart.js)
+- [ ] Gráfico de dona: distribución por canal (TIENDA, WHATSAPP, WEB)
+- [ ] Tabla: top 5 productos más vendidos con cantidad y monto
+- [ ] Filtro de rango de fechas (date picker PrimeNG)
+- [ ] Auto-refresh cada 60 segundos
+- [ ] Skeleton loading mientras se cargan los datos
+**Spec técnica:**
+- Componentes: `DashboardComponent`, `KpiCardComponent`, `SalesChartComponent`, `TopProductsComponent`
+- PrimeNG: `p-chart`, `p-card`, `p-calendar`, `p-table`, `p-skeleton`
+- Dependencias: HU-020, HU-040
+
+---
+
+### HU-042: Gestión de pedidos (frontend)
+**Como** operador,
+**Quiero** crear, listar y gestionar pedidos desde el panel web,
+**Para** registrar ventas y hacer seguimiento sin usar herramientas externas.
+**Prioridad:** Alta
+**Story Points:** 8
+**Módulo:** Frontend Web
+**Sprint:** 3
+**Acceptance Criteria:**
+- [ ] Tabla de pedidos con filtros: estado, canal, fecha, búsqueda por cliente — consume GET `/api/pedidos`
+- [ ] Paginación server-side con PrimeNG `p-table` lazy loading
+- [ ] Dialog/modal para crear pedido: seleccionar cliente (autocompletado), agregar items (producto, cantidad), notas
+- [ ] Botones de acción por pedido: Confirmar, Preparar, Entregar, Cancelar — consume PUT `/api/pedidos/{id}/estado`
+- [ ] Detalle de pedido en panel lateral o página dedicada — consume GET `/api/pedidos/{id}`
+- [ ] Badge de color por estado: PENDIENTE (amarillo), CONFIRMADO (azul), EN_PREPARACION (naranja), ENTREGADO (verde), CANCELADO (rojo)
+- [ ] Toast notifications al cambiar estado exitosamente
+**Spec técnica:**
+- Componentes: `PedidosListComponent`, `PedidoCreateDialogComponent`, `PedidoDetailComponent`
+- PrimeNG: `p-table`, `p-dialog`, `p-autoComplete`, `p-dropdown`, `p-tag`, `p-toast`
+- Servicio: `PedidosService` con HttpClient y observables
+- Dependencias: HU-006, HU-007, HU-008, HU-040
+
+---
+
+### HU-043: CRM — lista y detalle de clientes (frontend)
+**Como** operador,
+**Quiero** buscar, listar y ver el detalle de clientes desde el panel web,
+**Para** gestionar mi base de contactos y consultar el historial de cada cliente.
+**Prioridad:** Alta
+**Story Points:** 8
+**Módulo:** Frontend Web
+**Sprint:** 3
+**Acceptance Criteria:**
+- [ ] Búsqueda de clientes con autocompletado (nombre, cédula, teléfono) — consume GET `/api/crm/clientes?search=`
+- [ ] Tabla de clientes con columnas: nombre, cédula, teléfono, email, etiquetas, fecha registro
+- [ ] Dialog para crear/editar cliente con validación de campos ecuatorianos (cédula, RUC, teléfono 09XXXXXXXX)
+- [ ] Vista detalle de cliente con tabs: Datos, Pedidos, Mensajes WhatsApp, Notas
+- [ ] Asignar/quitar etiquetas desde el detalle del cliente (chip selector con colores)
+- [ ] Filtro por etiqueta en la lista de clientes
+**Spec técnica:**
+- Componentes: `ClientesListComponent`, `ClienteDetailComponent`, `ClienteFormDialogComponent`, `EtiquetasSelectorComponent`
+- PrimeNG: `p-table`, `p-autoComplete`, `p-chip`, `p-tabView`, `p-dialog`, `p-inputMask`
+- Servicio: `ClientesService`, `EtiquetasService`
+- Dependencias: HU-011, HU-012, HU-013, HU-014, HU-040
+
+---
+
+### HU-044: Configuración y branding (frontend)
+**Como** administrador,
+**Quiero** configurar el branding de mi empresa y gestionar mi suscripción desde el panel web,
+**Para** personalizar la plataforma y administrar mi cuenta.
+**Prioridad:** Media
+**Story Points:** 5
+**Módulo:** Frontend Web
+**Sprint:** 4
+**Acceptance Criteria:**
+- [ ] Página `/config/branding`: subir logo, elegir color primario/secundario (color picker), nombre comercial, slogan
+- [ ] Preview en tiempo real del branding aplicado
+- [ ] Página `/config/perfil`: datos de la empresa (nombre, RUC, email, teléfono)
+- [ ] Página `/config/suscripcion`: plan actual, features, fecha renovación, botón upgrade (info)
+- [ ] Página `/config/usuarios`: lista de usuarios del tenant, asignar roles (solo admin)
+- [ ] Consume endpoints PUT `/api/config/branding`, GET/PUT `/api/config/subscription`
+**Spec técnica:**
+- Componentes: `BrandingConfigComponent`, `PerfilComponent`, `SubscripcionComponent`, `UsuariosComponent`
+- PrimeNG: `p-fileUpload`, `p-colorPicker`, `p-inputText`, `p-card`, `p-dataView`
+- Dependencias: HU-023, HU-024, HU-005, HU-040
+
+---
+
+### HU-045: Conversaciones WhatsApp (frontend)
+**Como** operador,
+**Quiero** ver las conversaciones de WhatsApp y enviar mensajes desde el panel web,
+**Para** gestionar la comunicación con clientes sin cambiar de aplicación.
+**Prioridad:** Media
+**Story Points:** 8
+**Módulo:** Frontend Web
+**Sprint:** 4
+**Acceptance Criteria:**
+- [ ] Vista tipo chat: lista de conversaciones a la izquierda, mensajes a la derecha
+- [ ] Lista de conversaciones ordenada por último mensaje, con preview y timestamp
+- [ ] Área de mensajes: burbujas incoming/outgoing con timestamp y status (enviado, entregado, leído)
+- [ ] Input de mensaje con botón enviar — consume POST `/api/whatsapp/messages`
+- [ ] Indicador de estado de conexión WhatsApp (CONECTADO/DESCONECTADO)
+- [ ] Búsqueda de conversaciones por nombre o número
+- [ ] Polling cada 10 segundos para nuevos mensajes (WebSocket en fase 2)
+**Spec técnica:**
+- Componentes: `WhatsappLayoutComponent`, `ConversationListComponent`, `ChatWindowComponent`, `MessageBubbleComponent`
+- PrimeNG: `p-listbox`, `p-inputTextarea`, `p-badge`, `p-avatar`
+- Servicio: `WhatsappService` con polling interval
+- Dependencias: HU-016, HU-017, HU-040
+
+---
+
 ## DEFINITION OF DONE (DoD)
 
 Todo Story Point completado debe cumplir:
@@ -700,11 +1138,16 @@ Todo Story Point completado debe cumplir:
 | WhatsApp | 4 (HU-016 a HU-019) | 29 |
 | Reportes | 3 (HU-020 a HU-022) | 29 |
 | Configuración | 5 (HU-023 a HU-027) | 34 |
-| **TOTAL** | **27 HUs** | **166 SP** |
+| Facturación Electrónica SRI | 5 (HU-028 a HU-032) | 47 |
+| Citas (Appointments) | 6 (HU-033 a HU-038) | 34 |
+| Frontend Web (Angular) | 7 (HU-039 a HU-045) | 50 |
+| **TOTAL** | **45 HUs** | **297 SP** |
 
+> **MVP (Sprints 1-4):** 27 HUs backend + 5 HUs frontend (HU-039 a HU-043) = 32 HUs / 203 SP
+> **Fase 2 (Sprints 5-6):** Facturación SRI + Citas + frontend restante = 13 HUs / 94 SP
 > **Velocity estimado:** 35-45 SP/sprint (equipo de 3-4 developers full-stack)
-> **Capacidad 4 sprints:** 140-180 SP → 166 SP es ajustado pero alcanzable con focus
+> **Capacidad 6 sprints total:** 210-270 SP → 297 SP requiere priorización estricta
 
 ---
 
-*Document generated: 2026-03-18 | Version: 1.0 | Author: Alfred (PM Agent) | EGIT Consultoría*
+*Document generated: 2026-03-18 | Version: 2.0 | Updated: 2026-07-02 | Author: Alfred (PM Agent) | EGIT Consultoría*
